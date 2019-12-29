@@ -1,3 +1,11 @@
+This Module is based on the great work from PatHammer and timOoblik.
+At the core is their mouse.c program tweaked to interact with Magic Mirror.
+For the Magic Mirror Module large inspiration was drawn from Nischi / MMM - PIR Sensor and their interaction with external programs.
+
+Here is the original readme from kinect.mouse
+
+Start.
+
 Kinect Mouse
 Credit to:
 Tim Flaman - tim@timflaman.com for mouse movement http://www.twitter.com/timOoblik
@@ -11,3 +19,8 @@ OpenGL
 Glut
 Pthreads
 Utouch & Utouch-evemu - https://launchpad.net/utouch-evemu
+
+End.
+
+And Now for 2019/2020 update.
+
