@@ -82,6 +82,10 @@ When a stroke is classifed as a swipe:
  - all coordinates in stroke direction are monotonous (i.e. the gesture was monodirectional)
  - stroke takes no more then m seconds
  
+this all is done by a modified version of the original mouse version that will output json to stdout.
+
+the MMM plugin will get those json and act accordingly (send notifications etc within the MM framework).
+
 
 
 
