@@ -24,3 +24,66 @@ End.
 
 And Now for 2019/2020 update.
 
+All of this has been done on Raspberry 4b Debian Buster
+It will very likely work on Debian and Ubuntu without much changes.
+
+Installation:
+
+Install OpenCV 4.0 On the Raspberry 4
+Instructions are readily available on the net.
+
+Build OpenKinect
+Follow instructions on http://blog.bitcollectors.com/adam/2016/01/kinect-support-for-raspberry-pi-using-libfreenect/
+
+Be sure to add the kinect in the /etc/udev/rules.d/99-kinect.rules as specifed in one of the notes to the post:
+
+sudo vi /etc/udev/rules.d/99-kinect.rules
+add:
+# ATTR{product}==”Xbox NUI Audio”
+SUBSYSTEM==”usb”, ATTR{idVendor}==”045e”, ATTR{idProduct}==”02ad”, MODE=”0666″
+# ATTR{product}==”Xbox NUI Camera”
+SUBSYSTEM==”usb”, ATTR{idVendor}==”045e”, ATTR{idProduct}==”02ae”, MODE=”0666″
+# ATTR{product}==”Xbox NUI Motor”
+SUBSYSTEM==”usb”, ATTR{idVendor}==”045e”, ATTR{idProduct}==”02b0″, MODE=”0666″
+
+and then execute
+sudo /etc/init.d/udev restart
+or
+sudo shutdown -r now
+
+Optional : If you want to reenable the two mics inside the Kinect (Why not after all they are there...) follow this instructions:
+
+https://pierre.porcheret.org/index.php?p=YmxvZw==&article=457
+
+And that is it for Prerequisites.
+
+How does it work:
+The original virtual mouse is working by assuming you will be pointing your hand towards the kinect.
+Hence your hand will be the nearest object.
+The program locates your hand and scales it's position to the surface of the screen.
+Simple but effective enough.
+A mouse click is assumed when the pointer is steady in a square area of 15 pixels for more then x seconds.
+A tuning parameter is included to tune to mirror - person distance.
+
+New features added/modified.
+I added a simple algorithm to recognize vertical and horizontal 
+This is based on the assumption that a swipe will be a sequence of coordinates of the hand/pointer between non - interactions.
+That is we assume that when we "see" an hand it is either for moving the cursor at a specific location on the screen to click or to do a swipe and, after that, the hand will not be anymore visible to the kinec and at rest.
+We call this sequence of coordinates a "Stroke"
+
+we assume an horizontal swipe will be max maxdxswipe pixel wide and a vertical will be max maxdyswipe pixel tall
+So what we do is calculate the maximum horizontal distance (maxdx) and vertical distance (maxdy) of input coordinates in a stroke.
+if both dx>maxdx <nd dy>maxdy the stroke was not a swipe but a sequence of isolated coordinates.
+if just one of the vertical / horizontal strokes is within maxdy/maxdx parameters we verify if the stroke is a swipe (more on that later)
+if both strokes are within maxdy/maxdx parameters we verify the one with smallest dx/dy.
+
+When a stroke is classifed as a swipe:
+ - complementary dimension is at least n mixel wide
+ - all coordinates in stroke direction are monotonous (i.e. the gesture was monodirectional)
+ - stroke takes no more then m seconds
+ 
+
+
+
+
+
