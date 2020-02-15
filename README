@@ -26,11 +26,11 @@ And Now for 2019/2020 update.
 
 All of this has been done on Raspberry 4b Debian Buster
 It will very likely work on Debian and Ubuntu without much changes.
+Raspberry 2/3 are not powerful enough.
+Warning: Use original raspberry 4 firmware. With the updated firmware version usb communications were disrupted for me and the program did not work anymore
+If you do experiment and it works with updated firmware please let me know as I downgraded since.
 
 Installation:
-
-Install OpenCV 4.0 On the Raspberry 4
-Instructions are readily available on the net.
 
 Build OpenKinect
 Follow instructions on http://blog.bitcollectors.com/adam/2016/01/kinect-support-for-raspberry-pi-using-libfreenect/
@@ -56,6 +56,43 @@ Optional : If you want to reenable the two mics inside the Kinect (Why not after
 https://pierre.porcheret.org/index.php?p=YmxvZw==&article=457
 
 And that is it for Prerequisites.
+
+now git clone this repo 
+goto the build directory
+give a make command 
+that's it.
+
+If as it should it compiled without errors copy the kmouse_mm binary file to your bin path to have it accessible anywhere.
+
+The command accepts a veeery long list of parameters to tweak the output for your setup and debug:
+
+- NearPixel_TooClose: Number of maximum near pixel to accept before sending a too close message
+- NearPixel_TooFarOrNoise: Number of minimum near pixel to accept as pointer (i.e. not noise)
+- KinectLogLevel: Log level to output (0-7) 0 = nothing / 0 Flood
+- KinectSwhowScreen: 0: no output 1: Show camera and depth camera
+- KinectAngle: Start angle for kinect -30 : 30
+- KinectLed: Led color to light on 0-6
+- ClickSize: Size of the area to be considered as mouse steady for click
+- ClickPauseCount: number of subsequent frames with steady mouse to trigger a click 
+- minimum_stroke_points: minimum number of points to evaluate as a stroke
+- maximum_stroke_points: maximum number of points to evaluate as a stroke
+- Horizontal Variance threshold: maximum variance of coords in horizontal direction for a set of coords to be considered a vertical swipe
+- Vertical Variance threshold: maximum variance of coords in vertical direction for a set of coords to be considered an horizontal swipe
+- near_threshold: depth for near points
+- far_threshold: depth for far points
+- Elbow X
+- ElbowY
+- JSon Output X
+- Output program log
+- Output sensor status
+- Output Click events
+- Output Coordinates events
+- Output Swipe events
+- Verbose debug to stdout
+- Pause Verbose debug output at swipe evaluation
+
+It's easy to miss one parameter : in the git you find a couple of pretyped commands
+
 
 How does it work:
 The original virtual mouse is working by assuming you will be pointing your hand towards the kinect.
