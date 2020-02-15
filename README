@@ -57,12 +57,14 @@ https://pierre.porcheret.org/index.php?p=YmxvZw==&article=457
 
 And that is it for Prerequisites.
 
-now git clone this repo 
+Compiling:
+git clone this repo 
 goto the build directory
 give a make command 
 that's it.
 
 If as it should it compiled without errors copy the kmouse_mm binary file to your bin path to have it accessible anywhere.
+Dont't forget to make the compiled binary executable (chmod +x)
 
 The command accepts a veeery long list of parameters to tweak the output for your setup and debug:
 
@@ -91,8 +93,7 @@ The command accepts a veeery long list of parameters to tweak the output for you
 - Verbose debug to stdout
 - Pause Verbose debug output at swipe evaluation
 
-It's easy to miss one parameter : in the git you find a couple of pretyped commands
-
+It's easy to miss one parameter : in the git you find a couple of pretyped commands (only....sh shell scripts)
 
 How does it work:
 The original virtual mouse is working by assuming you will be pointing your hand towards the kinect.
@@ -100,29 +101,10 @@ Hence your hand will be the nearest object.
 The program locates your hand and scales it's position to the surface of the screen.
 Simple but effective enough.
 A mouse click is assumed when the pointer is steady in a square area of pixels for more then n subsequent frames.
-A tuning parameter is included to tune to mirror - person distance.
 
-New features added/modified.
-I added a simple algorithm to recognize vertical and horizontal 
-This is based on the assumption that a swipe will be a sequence of coordinates of the hand/pointer between non - interactions.
-That is we assume that when we "see" an hand it is either for moving the cursor at a specific location on the screen to click or to do a swipe and, after that, the hand will not be anymore visible to the kinec and at rest.
-We call this sequence of coordinates a "Stroke"
-
-we assume an horizontal swipe will be max maxdxswipe pixel wide and a vertical will be max maxdyswipe pixel tall
-So what we do is calculate the maximum horizontal distance (maxdx) and vertical distance (maxdy) of input coordinates in a stroke.
-if both dx>maxdx <nd dy>maxdy the stroke was not a swipe but a sequence of isolated coordinates.
-if just one of the vertical / horizontal strokes is within maxdy/maxdx parameters we verify if the stroke is a swipe (more on that later)
-if both strokes are within maxdy/maxdx parameters we verify the one with smallest dx/dy.
-
-When a stroke is classifed as a swipe:
- - complementary dimension is at least n mixel wide
- - all coordinates in stroke direction are monotonous (i.e. the gesture was monodirectional)
- - stroke takes no more then m seconds
- 
-this all is done by a modified version of the original mouse version that will output json to stdout.
-
-the MMM plugin will get those json and act accordingly (send notifications etc within the MM framework).
-
+New features added/modified (documentation WIP)
+recognize swipes
+ouput json
 
 
 
