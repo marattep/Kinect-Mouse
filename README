@@ -62,7 +62,7 @@ The original virtual mouse is working by assuming you will be pointing your hand
 Hence your hand will be the nearest object.
 The program locates your hand and scales it's position to the surface of the screen.
 Simple but effective enough.
-A mouse click is assumed when the pointer is steady in a square area of 15 pixels for more then x seconds.
+A mouse click is assumed when the pointer is steady in a square area of pixels for more then n subsequent frames.
 A tuning parameter is included to tune to mirror - person distance.
 
 New features added/modified.
