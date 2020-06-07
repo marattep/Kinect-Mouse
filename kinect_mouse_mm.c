@@ -31,7 +31,10 @@
 
 */
 
-
+/* June 2020
+ This is the mod to implement Median Claculation and WebSocket Communications
+ */
+ 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,10 +56,31 @@
 #include <time.h>
 //#include <gsl/gsl_math.h>
 
+// Median Calculation 
 #define SCREEN (DefaultScreen(display))
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
-
+ 
+//Customize for your data Item type
+typedef int Item;
+#define ItemLess(a,b)  ((a)<(b))
+#define ItemMean(a,b)  (((a)+(b))/2)
+ 
+typedef struct Mediator_t
+{
+   Item* data;  //circular queue of values
+   int*  pos;   //index into `heap` for each value
+   int*  heap;  //max/median/min heap holding indexes into `data`.
+   int   N;     //allocated size.
+   int   idx;   //position in circular queue
+   int   ct;    //count of items in queue
+} Mediator;
+ 
+/*--- Helper Functions ---*/
+ 
+#define minCt(m) (((m)->ct-1)/2) //count of items in minheap
+#define maxCt(m) (((m)->ct)/2)   //count of items in maxheap 
+ 
 int depth;
 char *display_name;
 
@@ -132,7 +156,7 @@ int current_pixel=0;
  // beginning of program, end of stroke ( blank or invalid screen or click)
 int StrokeEval=0; // Flag: evaluate swipe
 
-
+//Kinect Functions
 
 void DrawGLScene()
 {
@@ -326,6 +350,7 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 	float dpixelmax=-1;  //Distance of the furthest Pixel of Current blob of NP frame from screen center
 	int mx , my;
 	long NearPixelCount; // count of red pixels (near)
+	int pval,pmax;
 
 	pthread_mutex_lock(&gl_backbuf_mutex);
 
@@ -347,9 +372,11 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 	NearPixelMinY = 2000;
 	dpixel=0;
 	dpixelmax=-1;
+	pmax=0;
+	
 	for (i=0; i<FREENECT_FRAME_PIX; i++)
 	{
-		int pval = t_gamma[depth[i]];
+		pval = t_gamma[depth[i]];
 		tx++;
 		if(tx >= 640) 
 		{
@@ -362,12 +389,22 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 			gl_depth_back[3*i+0] = 255;
 			gl_depth_back[3*i+1] = 0;
 			gl_depth_back[3*i+2] = 0;
-			if (DistCen[tx][ty]>dpixelmax)  // Current Pixel found is furthest from screen center: update
+			if (pval > pmax)
 			{ 
-				dpixelmax=DistCen[tx][ty];
+				pmax=pval;
 				NearPixelX=tx;
 				NearPixelY=ty;
-			}
+				gl_depth_back[3*i+0] = 0;
+				gl_depth_back[3*i+1] = 255;
+			}			
+//			if (DistCen[tx][ty]>dpixelmax)  // Current Pixel found is furthest from screen center: update
+//			{ 
+//				dpixelmax=DistCen[tx][ty];
+//				NearPixelX=tx;
+//				NearPixelY=ty;
+//				gl_depth_back[3*i+0] = 0;
+//				gl_depth_back[3*i+1] = 255;
+//			}
 			NearPixelCount++;
 			NearPixelXSum+=tx;
 			NearPixelYSum+=ty;
@@ -665,6 +702,170 @@ void *freenect_threadfunc(void *arg)
 	return NULL;
 }
 
+//Median Calculation Functions
+
+//returns 1 if heap[i] < heap[j]
+int mmless(Mediator* m, int i, int j)
+{
+   return ItemLess(m->data[m->heap[i]],m->data[m->heap[j]]);
+}
+ 
+//swaps items i&j in heap, maintains indexes
+int mmexchange(Mediator* m, int i, int j)
+{
+   int t = m->heap[i];
+   m->heap[i]=m->heap[j];
+   m->heap[j]=t;
+   m->pos[m->heap[i]]=i;
+   m->pos[m->heap[j]]=j;
+   return 1;
+}
+ 
+//swaps items i&j if i<j;  returns true if swapped
+int mmCmpExch(Mediator* m, int i, int j)
+{
+   return (mmless(m,i,j) && mmexchange(m,i,j));
+}
+ 
+//maintains minheap property for all items below i/2.
+void minSortDown(Mediator* m, int i)
+{
+   for (; i <= minCt(m); i*=2)
+   {  if (i>1 && i < minCt(m) && mmless(m, i+1, i)) { ++i; }
+      if (!mmCmpExch(m,i,i/2)) { break; }
+   }
+}
+ 
+//maintains maxheap property for all items below i/2. (negative indexes)
+void maxSortDown(Mediator* m, int i)
+{
+   for (; i >= -maxCt(m); i*=2)
+   {  if (i<-1 && i > -maxCt(m) && mmless(m, i, i-1)) { --i; }
+      if (!mmCmpExch(m,i/2,i)) { break; }
+   }
+}
+ 
+//maintains minheap property for all items above i, including median
+//returns true if median changed
+int minSortUp(Mediator* m, int i)
+{
+   while (i>0 && mmCmpExch(m,i,i/2)) i/=2;
+   return (i==0);
+}
+ 
+//maintains maxheap property for all items above i, including median
+//returns true if median changed
+int maxSortUp(Mediator* m, int i)
+{
+   while (i<0 && mmCmpExch(m,i/2,i))  i/=2;
+   return (i==0);
+}
+ 
+/*--- Public Interface ---*/
+ 
+ 
+//creates new Mediator: to calculate `nItems` running median. 
+//mallocs single block of memory, caller must free.
+Mediator* MediatorNew(int nItems)
+{
+   int size = sizeof(Mediator)+nItems*(sizeof(Item)+sizeof(int)*2);
+   Mediator* m=  malloc(size);
+   m->data= (Item*)(m+1);
+   m->pos = (int*) (m->data+nItems);
+   m->heap = m->pos+nItems + (nItems/2); //points to middle of storage.
+   m->N=nItems;
+   m->ct = m->idx = 0;
+   while (nItems--)  //set up initial heap fill pattern: median,max,min,max,...
+   {  m->pos[nItems]= ((nItems+1)/2) * ((nItems&1)?-1:1);
+      m->heap[m->pos[nItems]]=nItems;
+   }
+   return m;
+}
+ 
+ 
+//Inserts item, maintains median in O(lg nItems)
+void MediatorInsert(Mediator* m, Item v)
+{
+   int isNew=(m->ct<m->N);
+   int p = m->pos[m->idx];
+   Item old = m->data[m->idx];
+   m->data[m->idx]=v;
+   m->idx = (m->idx+1) % m->N;
+   m->ct+=isNew;
+   if (p>0)         //new item is in minHeap
+   {  if (!isNew && ItemLess(old,v)) { minSortDown(m,p*2);  }
+      else if (minSortUp(m,p)) { maxSortDown(m,-1); }
+   }
+   else if (p<0)   //new item is in maxheap
+   {  if (!isNew && ItemLess(v,old)) { maxSortDown(m,p*2); }
+      else if (maxSortUp(m,p)) { minSortDown(m, 1); }
+   }
+   else            //new item is at median
+   {  if (maxCt(m)) { maxSortDown(m,-1); }
+      if (minCt(m)) { minSortDown(m, 1); }
+   }
+}
+ 
+//returns median item (or average of 2 when item count is even)
+Item MediatorMedian(Mediator* m)
+{
+   Item v= m->data[m->heap[0]];
+   if ((m->ct&1)==0) { v= ItemMean(v,m->data[m->heap[-1]]); }
+   return v;
+}
+ 
+ 
+/*--- Test Code ---*/
+#include <stdio.h>
+void PrintMaxHeap(Mediator* m)
+{
+   int i;
+   if(maxCt(m))
+      printf("Max: %3d",m->data[m->heap[-1]]);
+   for (i=2;i<=maxCt(m);++i)
+   {
+      printf("|%3d ",m->data[m->heap[-i]]);
+      if(++i<=maxCt(m)) printf("%3d",m->data[m->heap[-i]]);
+   }
+   printf("\n");
+}
+void PrintMinHeap(Mediator* m)
+{
+   int i;
+   if(minCt(m))
+      printf("Min: %3d",m->data[m->heap[1]]);
+   for (i=2;i<=minCt(m);++i)
+   {
+      printf("|%3d ",m->data[m->heap[i]]);
+      if(++i<=minCt(m)) printf("%3d",m->data[m->heap[i]]);
+   }
+   printf("\n");
+}
+ 
+void ShowTree(Mediator* m)
+{
+   PrintMaxHeap(m);
+   printf("Mid: %3d\n",m->data[m->heap[0]]);
+   PrintMinHeap(m);
+   printf("\n");
+}
+ 
+int mediantest(int argc, char* argv[])
+{
+   int i,v;
+   Mediator* m = MediatorNew(5);
+ 
+   for (i=0;i<20;i++)
+   {
+      v = rand()&127;
+//      v = i;
+      printf("Inserting %3d \n",v);
+      MediatorInsert(m,v);
+      v=MediatorMedian(m);
+      printf("Median = %3d.\n\n",v);
+      ShowTree(m);
+   }
+}
 
 int main(int argc, char **argv)
 {
@@ -713,7 +914,8 @@ int main(int argc, char **argv)
 //			printf("{ \"info\" : \"near_threshold: depth for near points %i\n",near_threshold\"}\n");
 //			printf("{ \"info\" : \"far_threshold: depth for far points %i\n",far_threshold\"}\n");
 //			printf("{ \"info\" : \"ystretch %f\n\n",ystretch\"}\n");
-//			printf("{ \"info\" : \"Elbow X %i\n",ScreenCenterX\"}\n");
+//			printf("{ \"info\" : \"	RorriM
+//			printf("{ \"info\" : \"ElbowY %i\n", ScreenCenterX\"}\n");
 //			printf("{ \"info\" : \"ElbowY %i\n", ScreenCenterY\"}\n");
 //			printf("{ \"info\" : \"JSon Output %d\n", jsonout\"}\n");
 //			printf("{ \"info\" : \"Send Click events %d\n", MMM_Output_clicks\"}\n");
