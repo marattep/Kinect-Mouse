@@ -113,7 +113,7 @@ freenect_context *f_ctx;
 freenect_device *f_dev;
 
 float pointerx = 0, pointery = 0;
-float mousex = 0, mousey = 0;
+float mousex = 0, mousey = 0;  // mouse cordinates in screen coordinates
 // float tmousex = 0, tmousey = 0;
 int screenw = 0, screenh = 0;
 int NearPixel_TooClose;  // Kinect depth NearPixel_TooClose maximum number of pixels 
@@ -123,7 +123,7 @@ int freenect_angle = -30;  //kinect inclination -30,30
 int freenect_led = 1;   //kinect led LED_OF= 0,    LED_GREEN  = 1,    LED_RED    = 2,    LED_YELLOW = 3, (actually orange)   LED_BLINK_YELLOW = 4, (actually orange)   LED_BLINK_GREEN = 5,   LED_BLINK_RED_YELLOW = 6 (actually red/orange) 
 int gesture_click_area =15; // size of pause area
 int hovering_threshold=15; // How many  iterations to wait to determine a click
-int near_threshold, far_threshold;
+int near_threshold, far_threshold; // depth threshold that indicate object nearness/farness
 int MMM_Output_log = 1;  // Output program log info to stdout in json format
 int MMM_Output_status = 1;  // Output sensor status to stdout in json format
 int MMM_Output_clicks = 1;  // Output click  info to stdout in json format
@@ -135,16 +135,16 @@ int debugstop = 0;  // stop at each debug info
 int stroke_x[1000],stroke_y[1000]; //We store all coordinates between two empty or invalid frames in this array
 int h_stroke_left2right_count, h_stroke_right2left_count, v_stroke_up2down_count, v_stroke_down2up_count; //stroke monotonouneness count: number of subsequent move in same direction.
 long h_stroke_left2right_sum, h_stroke_right2left_sum, v_stroke_up2down_sum, v_stroke_down2up_sum; //stroke monotonouneness count: sum of coordinates displacements of subsequent move in same direction.
-long h_sum,v_sum; 
-float h_mean,v_mean,h_variance,v_variance;
+long h_sum,v_sum; // sum of horizontal or vertical coordinates
+float h_mean,v_mean,h_variance,v_variance; // horizontal / vertical mean; horizontal / vertical variance 
 long left2rightmul, right2leftmul, up2downmul, down2upmul;
-long h_varmax=100,v_varmax=100; 
+long h_varmax=100,v_varmax=100; // Maximum horizontal or vertical Variance to assess a sequence of points as a horizontal or vertical strike 
 int minimum_stroke_points,maximum_stroke_points; // minimum number of coordinates to evaluate a stroke
 // float ystretch = 1.4;  // y stretch factor (supposing kinect is above or below mirror)
 int ScreenCenterX=320, ScreenCenterY=240; // Point to measure distance from hand (elbow)
 float DistCen[640][480]; // Precalculated Distances from Screen Center		
 int current_hovering_cycles = 0; // The current number of subsequent frames we are hovering over an hovering area
-int PointerX = 0, PointerY = 0; 
+int PointerX = 0, PointerY = 0; // need we to say what this is?
 int ShowScreen; // Display Camera and Depth Camera if 1
 
 pthread_cond_t gl_frame_cond = PTHREAD_COND_INITIALIZER;
@@ -154,7 +154,171 @@ int got_frames = 0;
 int current_pixel=0;
  // Number of points in stroke between invalid of blank frames; initialized at 0 at 
  // beginning of program, end of stroke ( blank or invalid screen or click)
-int StrokeEval=0; // Flag: evaluate swipe
+int StrokeEval=0; // Flag: evaluate swipe if set to 1
+
+//Median Calculation Functions
+
+//returns 1 if heap[i] < heap[j]
+int mmless(Mediator* m, int i, int j)
+{
+   return ItemLess(m->data[m->heap[i]],m->data[m->heap[j]]);
+}
+ 
+//swaps items i&j in heap, maintains indexes
+int mmexchange(Mediator* m, int i, int j)
+{
+   int t = m->heap[i];
+   m->heap[i]=m->heap[j];
+   m->heap[j]=t;
+   m->pos[m->heap[i]]=i;
+   m->pos[m->heap[j]]=j;
+   return 1;
+}
+ 
+//swaps items i&j if i<j;  returns true if swapped
+int mmCmpExch(Mediator* m, int i, int j)
+{
+   return (mmless(m,i,j) && mmexchange(m,i,j));
+}
+ 
+//maintains minheap property for all items below i/2.
+void minSortDown(Mediator* m, int i)
+{
+   for (; i <= minCt(m); i*=2)
+   {  if (i>1 && i < minCt(m) && mmless(m, i+1, i)) { ++i; }
+      if (!mmCmpExch(m,i,i/2)) { break; }
+   }
+}
+ 
+//maintains maxheap property for all items below i/2. (negative indexes)
+void maxSortDown(Mediator* m, int i)
+{
+   for (; i >= -maxCt(m); i*=2)
+   {  if (i<-1 && i > -maxCt(m) && mmless(m, i, i-1)) { --i; }
+      if (!mmCmpExch(m,i/2,i)) { break; }
+   }
+}
+ 
+//maintains minheap property for all items above i, including median
+//returns true if median changed
+int minSortUp(Mediator* m, int i)
+{
+   while (i>0 && mmCmpExch(m,i,i/2)) i/=2;
+   return (i==0);
+}
+ 
+//maintains maxheap property for all items above i, including median
+//returns true if median changed
+int maxSortUp(Mediator* m, int i)
+{
+   while (i<0 && mmCmpExch(m,i/2,i))  i/=2;
+   return (i==0);
+}
+ 
+/*--- Public Interface ---*/
+ 
+ 
+//creates new Mediator: to calculate `nItems` running median. 
+//mallocs single block of memory, caller must free.
+Mediator* MediatorNew(int nItems)
+{
+   int size = sizeof(Mediator)+nItems*(sizeof(Item)+sizeof(int)*2);
+   Mediator* m=  malloc(size);
+   m->data= (Item*)(m+1);
+   m->pos = (int*) (m->data+nItems);
+   m->heap = m->pos+nItems + (nItems/2); //points to middle of storage.
+   m->N=nItems;
+   m->ct = m->idx = 0;
+   while (nItems--)  //set up initial heap fill pattern: median,max,min,max,...
+   {  m->pos[nItems]= ((nItems+1)/2) * ((nItems&1)?-1:1);
+      m->heap[m->pos[nItems]]=nItems;
+   }
+   return m;
+}
+ 
+ 
+//Inserts item, maintains median in O(lg nItems)
+void MediatorInsert(Mediator* m, Item v)
+{
+   int isNew=(m->ct<m->N);
+   int p = m->pos[m->idx];
+   Item old = m->data[m->idx];
+   m->data[m->idx]=v;
+   m->idx = (m->idx+1) % m->N;
+   m->ct+=isNew;
+   if (p>0)         //new item is in minHeap
+   {  if (!isNew && ItemLess(old,v)) { minSortDown(m,p*2);  }
+      else if (minSortUp(m,p)) { maxSortDown(m,-1); }
+   }
+   else if (p<0)   //new item is in maxheap
+   {  if (!isNew && ItemLess(v,old)) { maxSortDown(m,p*2); }
+      else if (maxSortUp(m,p)) { minSortDown(m, 1); }
+   }
+   else            //new item is at median
+   {  if (maxCt(m)) { maxSortDown(m,-1); }
+      if (minCt(m)) { minSortDown(m, 1); }
+   }
+}
+ 
+//returns median item (or average of 2 when item count is even)
+Item MediatorMedian(Mediator* m)
+{
+   Item v= m->data[m->heap[0]];
+   if ((m->ct&1)==0) { v= ItemMean(v,m->data[m->heap[-1]]); }
+   return v;
+}
+ 
+ 
+/*--- Test Code ---*/
+void PrintMaxHeap(Mediator* m)
+{
+   int i;
+   if(maxCt(m))
+      printf("Max: %3d",m->data[m->heap[-1]]);
+   for (i=2;i<=maxCt(m);++i)
+   {
+      printf("|%3d ",m->data[m->heap[-i]]);
+      if(++i<=maxCt(m)) printf("%3d",m->data[m->heap[-i]]);
+   }
+   printf("\n");
+}
+void PrintMinHeap(Mediator* m)
+{
+   int i;
+   if(minCt(m))
+      printf("Min: %3d",m->data[m->heap[1]]);
+   for (i=2;i<=minCt(m);++i)
+   {
+      printf("|%3d ",m->data[m->heap[i]]);
+      if(++i<=minCt(m)) printf("%3d",m->data[m->heap[i]]);
+   }
+   printf("\n");
+}
+ 
+void ShowTree(Mediator* m)
+{
+   PrintMaxHeap(m);
+   printf("Mid: %3d\n",m->data[m->heap[0]]);
+   PrintMinHeap(m);
+   printf("\n");
+}
+ 
+int mediantest(int argc, char* argv[])
+{
+   int i,v;
+   Mediator* m = MediatorNew(5);
+ 
+   for (i=0;i<20;i++)
+   {
+      v = rand()&127;
+//      v = i;
+      printf("Inserting %3d \n",v);
+      MediatorInsert(m,v);
+      v=MediatorMedian(m);
+      printf("Median = %3d.\n\n",v);
+      ShowTree(m);
+   }
+}
 
 //Kinect Functions
 
@@ -337,7 +501,7 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 	// We search in every frame returned by the kinect for a group of NearPixels.
 	// Hopefully this is the forearm of the subject facing the kinect
 	// We assume the direction the mouse pointer is the furthest point of the blob from screen center
-	// This works very well when poiting at "edge" locations of the screen . So and so for the center
+	// NOTE: Pixel variables are local to the function; Stroke variables are GLOBAL and persist across function call
 
 	int i,j;
 	long NearPixelXSum, NearPixelYSum; // Sum of X and Y coordinates of NearPixels. Used for Swipe evaluation
@@ -348,14 +512,13 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 	uint16_t *depth = v_depth;
 	float dpixel=0; 	// Distance of current pixel from the center of the screen
 	float dpixelmax=-1;  //Distance of the furthest Pixel of Current blob of NP frame from screen center
-	int mx , my;
+	int mx , my;  // mouse x and y coordinates
 	long NearPixelCount; // count of red pixels (near)
-	int pval,pmax;
-
+	int pval,pmax; // pval is current pixel depth according to kinect sensor. pmax is the maximun pval found
 	pthread_mutex_lock(&gl_backbuf_mutex);
 
 	if(debug) printf("___________________________BEGINOFRAME_________________________\n");
-	if(debug) 	printf("Got a Frame, Anlyzing it\n");
+	if(debug) printf("Got a Frame, Anlyzing it\n");
 //
 //Loop all pixels of current frame and search for at least one near pixel
 //
@@ -373,23 +536,69 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 	dpixel=0;
 	dpixelmax=-1;
 	pmax=0;
+	// Init median calculation Structure. We need the median of values in a 3x3 matrix around current pixel
+	Mediator* kmedian = MediatorNew(9);
 	
-	for (i=0; i<FREENECT_FRAME_PIX; i++)
+//
+//Begin of : Loop all pixels of current frame and search for at least one near pixel
+// Remember this is a call back: one pixel per callback is evaluated. A stroke is evaluated in subsequent calls to the callaback
+// pixel 0,0		_____________
+// pixel 1,0		|0,0|0,1|0,2|
+// pixel 2,0		|___|___|___|
+// pixel 0,1		|1,0|1,1|1,2|
+// pixel 1,1		|___|CUR|___|
+// pixel 2,1		|2,0|2,1|2,2|
+// pixel 0,2		|___|___|___|
+// pixel 1,2
+// pixel 2,2
+
+// Initial load of median structure (pixel 1,1 of depth matrix)
+// left column
+	MediatorInsert(kmedian,t_gamma[depth[0]]);
+	MediatorInsert(kmedian,t_gamma[depth[640]]);
+	MediatorInsert(kmedian,t_gamma[depth[1280]]);
+// center column
+	MediatorInsert(kmedian,t_gamma[depth[1]]);
+	MediatorInsert(kmedian,t_gamma[depth[641]]);
+	MediatorInsert(kmedian,t_gamma[depth[1281]]);
+// right column
+	MediatorInsert(kmedian,t_gamma[depth[2]]);
+	MediatorInsert(kmedian,t_gamma[depth[642]]);
+	MediatorInsert(kmedian,t_gamma[depth[1282]]);
+
+	for (i=641; i<FREENECT_FRAME_PIX-640; i++)  // go over inner values od depth matrix (i.e. skip first and last rows and first and last columns)
 	{
-		pval = t_gamma[depth[i]];
+		if ((i % 640) == 639) i+=2; // if we are at column before last jump to column 1
+		//update  median evaluation structure
+	// left column
+		MediatorInsert(kmedian,t_gamma[depth[i-641]]);
+		MediatorInsert(kmedian,t_gamma[depth[i-1]]);
+		MediatorInsert(kmedian,t_gamma[depth[i+639]]);
+	// center column
+		MediatorInsert(kmedian,t_gamma[depth[i-640]]);
+		MediatorInsert(kmedian,t_gamma[depth[i]]);
+		MediatorInsert(kmedian,t_gamma[depth[i+640]]);
+	// right column
+		MediatorInsert(kmedian,t_gamma[depth[i-639]]);
+		MediatorInsert(kmedian,t_gamma[depth[i+1]]);
+		MediatorInsert(kmedian,t_gamma[depth[i+641]]);
+
+	    pval=MediatorMedian(kmedian);
 		tx++;
-		if(tx >= 640) 
+		if(tx >= 640) // end of line reached
 		{
 			tx = 0;		
-			ty++;
+			ty++;		// new line
 		}
 //		Near range pixels : red color
+
+// pval is the median of depth of 9 pixels centered at current pixel
 		if (pval < near_threshold )  // We found a NearPixel
 		{
 			gl_depth_back[3*i+0] = 255;
 			gl_depth_back[3*i+1] = 0;
 			gl_depth_back[3*i+2] = 0;
-			if (pval > pmax)
+			if (pval > pmax)  // new deeper pixel (i.e. near to screeen)
 			{ 
 				pmax=pval;
 				NearPixelX=tx;
@@ -405,13 +614,13 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 //				gl_depth_back[3*i+0] = 0;
 //				gl_depth_back[3*i+1] = 255;
 //			}
-			NearPixelCount++;
-			NearPixelXSum+=tx;
-			NearPixelYSum+=ty;
-			NearPixelMaxX=MAX(NearPixelMaxX,tx);
-			NearPixelMinX=MIN(NearPixelMinX,tx);
-			NearPixelMaxY=MAX(NearPixelMaxY,ty);
-			NearPixelMinY=MIN(NearPixelMinY,ty);
+			NearPixelCount++;	// we accumulate number of near pixels
+			NearPixelXSum+=tx;  // we sum up x coordinates
+			NearPixelYSum+=ty;  // we sum up y coordinates
+			NearPixelMaxX=MAX(NearPixelMaxX,tx); // we save max x coordinate of nearpixel
+			NearPixelMinX=MIN(NearPixelMinX,tx); // we save min x coordinate of nearpixel
+			NearPixelMaxY=MAX(NearPixelMaxY,ty); // we save max y coordinate of nearpixel
+			NearPixelMinY=MIN(NearPixelMinY,ty); // we save min y coordinate of nearpixel
 		}
 	
 //		Default: mid range pixels : white color
@@ -445,7 +654,8 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
     	if(debug)	printf("Subject too close\n");
 		if(jsonout && MMM_Output_status)	printf("{ \"status\" : \"tooclose\"\n}"	);
 		StrokeEval=1;
-	} 
+	}
+
 // Number of Pixels in Near Blobs is less then threshold NearPixel_TooFarOrNoise given in input but non zero
 // This means the subject is within reach but still too far
 // Reset Pixel Count and restart swipe evaluation 
@@ -454,7 +664,8 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
     	if(debug)	printf("Some pixels detected but subject too far\n");
 		if(jsonout && MMM_Output_status) printf("{ \"status\" : \"somepixels\" }\n" );
 		StrokeEval=1;
-	} 	
+	}
+
 // No near Pixel found
 // This means the subject is out of range in current frame
 // Reset Pixel Count and restart swipe evaluation 
@@ -467,14 +678,16 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 
 // Number of NearPixels in blobs found is neither to small nor too big: subject hand in range
 // a swipe is evaluated by evaluating subsequent pixels found between empty frames
+// that is : an empty frame (a frame with subject either too far or too close) is considered as a "break" between gestures
 // We record x and y coordinates of pixels found in an array
-	if (NearPixelCount !=0 && NearPixelCount < NearPixel_TooClose && NearPixelCount > NearPixel_TooFarOrNoise)  // So we have a proper blob of red newar points.
+// Begin of section: analyze blob of nearpixels
+	if (NearPixelCount !=0 && NearPixelCount < NearPixel_TooClose && NearPixelCount > NearPixel_TooFarOrNoise)  
 	{		
-		pointerx = ((NearPixelX-640.0f) / -1);
-		pointery = (NearPixelY);
-		mousex = ((pointerx / 630.0f) * screenw);
-		mousey = ((pointery / 470.0f) * screenh);
-		mx = mousex;
+		pointerx = ((NearPixelX-640.0f) / -1); 		// get current x coordinates
+		pointery = (NearPixelY);					// get current y coordinates
+		mousex = ((pointerx / 630.0f) * screenw);	// scale x coordinates to screen size
+		mousey = ((pointery / 470.0f) * screenh);	// scale y coordinates to screen size
+		mx = mousex;			
 		my = mousey;
     	if(debug)
     	{ 
@@ -482,8 +695,8 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
     		printf("Mouse coordinates  %3d %4d\n",mx,my);
     		printf("Stroke Index  %d \n",current_pixel);
     	}
-		stroke_x[current_pixel]=mx; //save current x coord
-		stroke_y[current_pixel]=my; //save cuurent y coord
+		stroke_x[current_pixel]=mx; //save current x coord in array of stroke pints
+		stroke_y[current_pixel]=my; //save cuurent y coord in array of stroke pints
 		if(jsonout && MMM_Output_clicks)	printf("{ \"coord\" : { \"xy\" : \"[ %d , %d]\" }}\n",mx,my );
 // This is the first point between invalid or empty frames: reset swipe evaluation support variables
 		if(current_pixel==0) 
@@ -509,7 +722,7 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 			down2upmul=0;
 			StrokeEval=0;
 		} 
-		else
+		else // this is an additional point in a stroke. Update swipe statistics variables
 		{  
     		if(debug)	printf("Update  swipe variables\n");
     		if (stroke_x[current_pixel]>stroke_x[current_pixel-1]) 
@@ -564,26 +777,28 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 // Set debounce count to avoid double clicks    			
 		if(current_hovering_cycles > hovering_threshold) 
 		{
-			current_hovering_cycles = -hovering_threshold*2;  // set debounce count
-			XTestFakeButtonEvent(display, 1, TRUE, CurrentTime);
-			XTestFakeButtonEvent(display, 1, FALSE, CurrentTime);
+			current_hovering_cycles = -hovering_threshold*2;  		// set debounce count
+			XTestFakeButtonEvent(display, 1, TRUE, CurrentTime);  	// send mouse lmb down 
+			XTestFakeButtonEvent(display, 1, FALSE, CurrentTime);	// send mouse lmb up
 			current_pixel=0;  //Reset Stroke Pixel Index 
 			StrokeEval=0;
 	    	if(debug)	printf("Click at \tX %d\tY %dn",mx,my);
 			if(jsonout && MMM_Output_clicks)	printf("{ \"click\" : { \"xy\" : \"[ %d , %d]\" }}\n",mx,my );
 		}
-		XTestFakeMotionEvent(display, -1, mx, my, CurrentTime);
+		XTestFakeMotionEvent(display, -1, mx, my, CurrentTime);		// send mouse movement
 		if(debug)	printf("Coordinates \tX %3d\tY %3d\n",mx,my);
 //		if(jsonout && MMM_Output_coords)	printf("{ \"coords\" : { \"xy\" : \"[ %d , %d]\" }}\n",mx,my );
 		XSync(display, 0);
 	}
+	// End of section: analyze blob of nearpixels
 
-// Evaluate Swipe if frame empty or not in threshold 
+// begin of section: Evaluate Swipe if frame empty or not in threshold 
 	if(StrokeEval)
 	{
+// Begin of section: We have a sequence of points that are between the allowed paramenters set
 		if (current_pixel>minimum_stroke_points && current_pixel<maximum_stroke_points) 
 		{
-			h_mean=h_sum/current_pixel;
+			h_mean=h_sum/current_pixel;  //calculate statistics for euristic
 			v_mean=v_sum/current_pixel;
 			for (j=0;j<current_pixel;j++)	
 			{
@@ -610,43 +825,37 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 				printf("h_mean\tv_mean\t%5.5f\t%5.5f\n",h_mean,v_mean);
 				printf("h_variance\tv_variance\t%5.5f\t%5.5f\n",h_variance,v_variance);
 				printf("____________________________________________\n");
-				if (h_variance<h_varmax || v_variance<v_varmax)
-				{
-					if(h_variance<v_variance)
-					{ 
-						printf("Vertical ");
-						if(up2downmul>down2upmul) printf("Down \n"); else printf("Up \n");				
-					}
-					else
-					{ 
-						printf("Horizontal ");
-						if(left2rightmul>right2leftmul) printf("right \n"); else printf("left \n");				
-					}
-				}	
-				else
-				{
-						printf("No Swipe\n");
-				}	
 			}
-			if(debugstop) getchar();
-			if(jsonout && MMM_Output_swipes)
-			{ 
-				if(h_variance<h_varmax || v_variance<v_varmax)
+			if (h_variance<h_varmax || v_variance<v_varmax)  // Either Variance is belo variance threshold parameter
+			{
+				if (h_variance<h_varmax && v_variance<v_varmax)
+				{ 
+					if(debug) printf("Garbage ");
+				}
+				else
 				{ 
 					if(h_variance<v_variance)
-					{ 
-						if(up2downmul>down2upmul) printf("{ \"swipe\" : \"down\" }\n" ); else printf("{ \"swipe\" : \"up\" }\n" );				
-					}
-					else
-					{ 
-						if(left2rightmul>right2leftmul)	printf("{ \"swipe\" : \"right\" }\n" ); else printf("{ \"swipe\" : \"left\" }\n" );				
-					}
-				}	
-	   		}
-			StrokeEval=0;
-			current_pixel=0;
-		}
+				   	{ 
+						if(debug) if(up2downmul>down2upmul) printf("Down \n"); else printf("Up \n");				
+						if(jsonout && MMM_Output_swipes) if(up2downmul>down2upmul) printf("{ \"swipe\" : \"down\" }\n" ); else printf("{ \"swipe\" : \"up\" }\n" );				
+				   	}
+				   	else
+				   	{ 
+				   		if(debug) if(left2rightmul>right2leftmul) printf("right \n"); else printf("left \n");				
+						if(jsonout && MMM_Output_swipes) if(left2rightmul>right2leftmul)	printf("{ \"swipe\" : \"right\" }\n" ); else printf("{ \"swipe\" : \"left\" }\n" );				
+				   	}
+				}
+			}	
+			else
+			{
+					if(debug) printf("No Swipe\n");
+			}	
+		}  // End of section: We have a sequence of points that are between the allowed paramenters 
+		if(debugstop) getchar();
+		StrokeEval=0;
+		current_pixel=0;
 	}
+	// end of section: Evaluate Swipe if frame empty or not in threshold 
 		
 	got_frames++;
 	pthread_cond_signal(&gl_frame_cond);
@@ -702,178 +911,16 @@ void *freenect_threadfunc(void *arg)
 	return NULL;
 }
 
-//Median Calculation Functions
-
-//returns 1 if heap[i] < heap[j]
-int mmless(Mediator* m, int i, int j)
-{
-   return ItemLess(m->data[m->heap[i]],m->data[m->heap[j]]);
-}
- 
-//swaps items i&j in heap, maintains indexes
-int mmexchange(Mediator* m, int i, int j)
-{
-   int t = m->heap[i];
-   m->heap[i]=m->heap[j];
-   m->heap[j]=t;
-   m->pos[m->heap[i]]=i;
-   m->pos[m->heap[j]]=j;
-   return 1;
-}
- 
-//swaps items i&j if i<j;  returns true if swapped
-int mmCmpExch(Mediator* m, int i, int j)
-{
-   return (mmless(m,i,j) && mmexchange(m,i,j));
-}
- 
-//maintains minheap property for all items below i/2.
-void minSortDown(Mediator* m, int i)
-{
-   for (; i <= minCt(m); i*=2)
-   {  if (i>1 && i < minCt(m) && mmless(m, i+1, i)) { ++i; }
-      if (!mmCmpExch(m,i,i/2)) { break; }
-   }
-}
- 
-//maintains maxheap property for all items below i/2. (negative indexes)
-void maxSortDown(Mediator* m, int i)
-{
-   for (; i >= -maxCt(m); i*=2)
-   {  if (i<-1 && i > -maxCt(m) && mmless(m, i, i-1)) { --i; }
-      if (!mmCmpExch(m,i/2,i)) { break; }
-   }
-}
- 
-//maintains minheap property for all items above i, including median
-//returns true if median changed
-int minSortUp(Mediator* m, int i)
-{
-   while (i>0 && mmCmpExch(m,i,i/2)) i/=2;
-   return (i==0);
-}
- 
-//maintains maxheap property for all items above i, including median
-//returns true if median changed
-int maxSortUp(Mediator* m, int i)
-{
-   while (i<0 && mmCmpExch(m,i/2,i))  i/=2;
-   return (i==0);
-}
- 
-/*--- Public Interface ---*/
- 
- 
-//creates new Mediator: to calculate `nItems` running median. 
-//mallocs single block of memory, caller must free.
-Mediator* MediatorNew(int nItems)
-{
-   int size = sizeof(Mediator)+nItems*(sizeof(Item)+sizeof(int)*2);
-   Mediator* m=  malloc(size);
-   m->data= (Item*)(m+1);
-   m->pos = (int*) (m->data+nItems);
-   m->heap = m->pos+nItems + (nItems/2); //points to middle of storage.
-   m->N=nItems;
-   m->ct = m->idx = 0;
-   while (nItems--)  //set up initial heap fill pattern: median,max,min,max,...
-   {  m->pos[nItems]= ((nItems+1)/2) * ((nItems&1)?-1:1);
-      m->heap[m->pos[nItems]]=nItems;
-   }
-   return m;
-}
- 
- 
-//Inserts item, maintains median in O(lg nItems)
-void MediatorInsert(Mediator* m, Item v)
-{
-   int isNew=(m->ct<m->N);
-   int p = m->pos[m->idx];
-   Item old = m->data[m->idx];
-   m->data[m->idx]=v;
-   m->idx = (m->idx+1) % m->N;
-   m->ct+=isNew;
-   if (p>0)         //new item is in minHeap
-   {  if (!isNew && ItemLess(old,v)) { minSortDown(m,p*2);  }
-      else if (minSortUp(m,p)) { maxSortDown(m,-1); }
-   }
-   else if (p<0)   //new item is in maxheap
-   {  if (!isNew && ItemLess(v,old)) { maxSortDown(m,p*2); }
-      else if (maxSortUp(m,p)) { minSortDown(m, 1); }
-   }
-   else            //new item is at median
-   {  if (maxCt(m)) { maxSortDown(m,-1); }
-      if (minCt(m)) { minSortDown(m, 1); }
-   }
-}
- 
-//returns median item (or average of 2 when item count is even)
-Item MediatorMedian(Mediator* m)
-{
-   Item v= m->data[m->heap[0]];
-   if ((m->ct&1)==0) { v= ItemMean(v,m->data[m->heap[-1]]); }
-   return v;
-}
- 
- 
-/*--- Test Code ---*/
-#include <stdio.h>
-void PrintMaxHeap(Mediator* m)
-{
-   int i;
-   if(maxCt(m))
-      printf("Max: %3d",m->data[m->heap[-1]]);
-   for (i=2;i<=maxCt(m);++i)
-   {
-      printf("|%3d ",m->data[m->heap[-i]]);
-      if(++i<=maxCt(m)) printf("%3d",m->data[m->heap[-i]]);
-   }
-   printf("\n");
-}
-void PrintMinHeap(Mediator* m)
-{
-   int i;
-   if(minCt(m))
-      printf("Min: %3d",m->data[m->heap[1]]);
-   for (i=2;i<=minCt(m);++i)
-   {
-      printf("|%3d ",m->data[m->heap[i]]);
-      if(++i<=minCt(m)) printf("%3d",m->data[m->heap[i]]);
-   }
-   printf("\n");
-}
- 
-void ShowTree(Mediator* m)
-{
-   PrintMaxHeap(m);
-   printf("Mid: %3d\n",m->data[m->heap[0]]);
-   PrintMinHeap(m);
-   printf("\n");
-}
- 
-int mediantest(int argc, char* argv[])
-{
-   int i,v;
-   Mediator* m = MediatorNew(5);
- 
-   for (i=0;i<20;i++)
-   {
-      v = rand()&127;
-//      v = i;
-      printf("Inserting %3d \n",v);
-      MediatorInsert(m,v);
-      v=MediatorMedian(m);
-      printf("Median = %3d.\n\n",v);
-      ShowTree(m);
-   }
-}
 
 int main(int argc, char **argv)
 {
 	int res;
 
-    if (argc != 25) {
-		if (jsonout && MMM_Output_log) printf("{ \"log\" : \"Wrong Number of Parameters: %2d \"}\n",argc);
-		printf("Error : Wrong Number of Parameters %2d \n",argc);
+    if ((argc != 25) || ((argc == 1) && strcmp (argv[1],"--help")))
+	{
+		if (argc!=25)
+			if (jsonout && MMM_Output_log) 	printf("{ \"log\" : \"Wrong Number of Parameters: %2d \"}\n",argc);
+		printf("Number of Parameters %2d \n",argc);
 		printf("- NearPixel_TooClose: Number of maximum near pixel to accept before sending a too close message\n");
 		printf("- NearPixel_TooFarOrNoise: Number of minimum near pixel to accept as pointer (i.e. not noise)\n");
 		printf("- KinectLogLevel: Log level to output (0-7) 0 = nothing / 0 Flood\n");
@@ -948,7 +995,7 @@ int main(int argc, char **argv)
 		debug = atoi(argv[23]); 
 		debugstop = atoi(argv[24]); 
 
-		if(jsonout && MMM_Output_log)	{
+		if((jsonout && MMM_Output_log) || debug)	{
 			printf("{ \"log\" : \"Kinect Mouse and Swipe starting\"}\n");
 			printf("{ \"log\" : \"Parsing Args\"}\n");
 			printf("{ \"log\" : \"NearPixel_TooClose %i \"}\n",NearPixel_TooClose);
@@ -965,18 +1012,17 @@ int main(int argc, char **argv)
 			printf("{ \"log\" : \"vertical variance threshold for swipe%i \"}\n",maximum_stroke_points);
 			printf("{ \"log\" : \"near_threshold: %i \"}\n" ,near_threshold);
 			printf("{ \"log\" : \"far_threshold: depth for far points %i \"}\n",far_threshold);
-			printf("{ \"log\" : \"Elbow X %i \"}\n",ScreenCenterX);
+			printf("{ \"log\" : \"ElbowX %i \"}\n",ScreenCenterX);
 			printf("{ \"log\" : \"ElbowY %i \"}\n", ScreenCenterY);
 			printf("{ \"log\" : \"JSon Output %d \"}\n", jsonout);
-			printf("{ \"log\" : \"Output status to stdout%d \"}\n", MMM_Output_status);
-			printf("{ \"log\" : \"Output log to stdout%d \"}\n", MMM_Output_log);
+			printf("{ \"log\" : \"Output status to stdout %d \"}\n", MMM_Output_status);
+			printf("{ \"log\" : \"Output log to stdout %d \"}\n", MMM_Output_log);
 			printf("{ \"log\" : \"Output Click events to stdout %d \"}\n", MMM_Output_clicks);
 			printf("{ \"log\" : \"Output Coordinates events to stdout %d \"}\n", MMM_Output_coords);
 			printf("{ \"log\" : \"Output Swipe events to stdout %d \"}\n", MMM_Output_swipes);
 			printf("{ \"log\" : \"Verbose debug %d \"}\n", debug);
-			printf("{ \"log\" : \"Verbose debug stop at swipe eval%d \"}\n", debugstop);
+			printf("{ \"log\" : \"Verbose debug stop at swipe eval %d \"}\n", debugstop);
 		}
-
 	}
 	
 	
