@@ -103,7 +103,16 @@ New features added/modified (documentation WIP)
 recognize swipes
 ouput json
 
+xhost +local:docker
 
-
+docker run -it --rm \
+  -e DISPLAY=$DISPLAY \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  --device /dev/bus/usb:/dev/bus/usb \
+  --privileged \
+  -v $(pwd):/app \
+  -w /app \
+  kinectmouse:latest \
+  bash -c "cmake . && make && ./onlydebug.sh"
 
 

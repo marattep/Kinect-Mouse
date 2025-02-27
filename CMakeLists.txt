@@ -1,12 +1,27 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.2)
 
-add_executable(kmouse kinect_mouse.c)
+# Add the path to the custom CMake modules
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
+
+add_executable(kmouse kinect_mouse_mm.c)
 
 find_package(Threads REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(GLUT REQUIRED)
-include_directories(${OPENGL_INCLUDE_DIRS} ${GLUT_INCLUDE_DIRS} ${USB_INCLUDE_DIRS})
-target_link_libraries(kmouse freenect X11 Xtst ncurses ${OPENGL_LIBRARIES} ${GLUT_LIBRARY} ${CMAKE_THREAD_LIBS_INIT} m)
+find_package(freenect REQUIRED)
+
+if (NOT GLUT_FOUND)
+  message(FATAL_ERROR "GLUT not found!")
+endif()
+if (NOT freenect_FOUND)
+  message(FATAL_ERROR "libfreenect not found!")
+endif()
+
+message(STATUS "GLUT library: ${GLUT_LIBRARY}")
+message(STATUS "libfreenect library: ${FREENECT_LIBRARIES}")
+
+include_directories(${OPENGL_INCLUDE_DIRS} ${GLUT_INCLUDE_DIRS} ${USB_INCLUDE_DIRS} ${FREENECT_INCLUDE_DIRS})
+target_link_libraries(kmouse ${FREENECT_LIBRARIES} X11 Xtst ncurses ${OPENGL_LIBRARIES} ${GLUT_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} m)
 
 install (TARGETS kmouse
   DESTINATION bin)

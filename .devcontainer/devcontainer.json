@@ -8,8 +8,9 @@
       "terminal.integrated.shell.linux": "/bin/bash"
   },
   "extensions": [
-      "ms-vscode.cpptools",
-      "ms-vscode.cmake-tools"
+    "ms-vscode.cpptools",
+    "ms-vscode.cmake-tools",
+    "ms-azuretools.vscode-docker"
   ],
   "postCreateCommand": "cmake . && make",
   "remoteUser": "vscode"
