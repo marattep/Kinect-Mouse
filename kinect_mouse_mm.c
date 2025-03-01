@@ -84,6 +84,125 @@ typedef struct Mediator_t
 int depth;
 char *display_name;
 
+typedef struct {
+    int NearPixel_TooClose;
+    int NearPixel_TooFarOrNoise;
+    int freenect_log_level;
+    int freenect_angle;
+    int freenect_led;
+    int gesture_click_area;
+    int hovering_threshold;
+    int near_threshold;
+    int far_threshold;
+    int MMM_Output_log;
+    int MMM_Output_status;
+    int MMM_Output_clicks;
+    int MMM_Output_coords;
+    int MMM_Output_swipes;
+    int jsonout;
+    int debug;
+    int debugstop;
+    int minimum_stroke_points;
+    int maximum_stroke_points;
+    long h_varmax;
+    long v_varmax;
+    int ScreenCenterX;
+    int ScreenCenterY;
+    int ShowScreen;
+} KinectMouseConfig;
+
+typedef struct {
+    int depth;
+    char *display_name;
+    Display *display;
+    Window main_window;
+    Window root_window;
+    pthread_t freenect_thread;
+    volatile int die;
+    int g_argc;
+    char **g_argv;
+    int window;
+    float tmprot;
+    pthread_mutex_t gl_backbuf_mutex;
+    uint8_t gl_depth_front[640*480*4];
+    uint8_t gl_depth_back[640*480*4];
+    uint8_t gl_rgb_front[640*480*4];
+    uint8_t gl_rgb_back[640*480*4];
+    GLuint gl_depth_tex;
+    GLuint gl_rgb_tex;
+    freenect_context *f_ctx;
+    freenect_device *f_dev;
+    float pointerx, pointery;
+    float mousex, mousey;
+    int screenw, screenh;
+    int stroke_x[1000], stroke_y[1000];
+    int h_stroke_left2right_count, h_stroke_right2left_count;
+    int v_stroke_up2down_count, v_stroke_down2up_count;
+    long h_stroke_left2right_sum, h_stroke_right2left_sum;
+    long v_stroke_up2down_sum, v_stroke_down2up_sum;
+    long h_sum, v_sum;
+    float h_mean, v_mean, h_variance, v_variance;
+    long left2rightmul, right2leftmul, up2downmul, down2upmul;
+    float DistCen[640][480];
+    int current_hovering_cycles;
+    int PointerX, PointerY;
+    pthread_cond_t gl_frame_cond;
+    int got_frames;
+    int current_pixel;
+    int StrokeEval;
+    KinectMouseConfig config;
+} KinectMouseState;
+
+KinectMouseState state = {
+    .gl_backbuf_mutex = PTHREAD_MUTEX_INITIALIZER,
+    .gl_frame_cond = PTHREAD_COND_INITIALIZER,
+    .die = 0,
+    .tmprot = 1,
+    .pointerx = 0,
+    .pointery = 0,
+    .mousex = 0,
+    .mousey = 0,
+    .screenw = 0,
+    .screenh = 0,
+    .got_frames = 0,
+    .current_pixel = 0,
+    .StrokeEval = 0,
+    .config = {
+        .NearPixel_TooClose = 0,
+        .NearPixel_TooFarOrNoise = 0,
+        .freenect_log_level = 0,
+        .freenect_angle = -30,
+        .freenect_led = 1,
+        .gesture_click_area = 15,
+        .hovering_threshold = 15,
+        .near_threshold = 0,
+        .far_threshold = 0,
+        .MMM_Output_log = 1,
+        .MMM_Output_status = 1,
+        .MMM_Output_clicks = 1,
+        .MMM_Output_coords = 1,
+        .MMM_Output_swipes = 1,
+        .jsonout = 1,
+        .debug = 1,
+        .debugstop = 0,
+        .h_varmax = 100,
+        .v_varmax = 100,
+        .minimum_stroke_points = 0,
+        .maximum_stroke_points = 0,
+        .ScreenCenterX = 320,
+        .ScreenCenterY = 240,
+        .ShowScreen = 0
+    }
+};
+
+/*--- Helper Functions ---*/
+ 
+#define minCt(m) (((m)->ct-1)/2) //count of items in minheap
+#define maxCt(m) (((m)->ct)/2)   //count of items in maxheap 
+ 
+int depth;
+char *display_name;
+
 Display *display;
 Window main_window;
 Window root_window;
@@ -112,49 +231,7 @@ GLuint gl_rgb_tex;
 freenect_context *f_ctx;
 freenect_device *f_dev;
 
-float pointerx = 0, pointery = 0;
-float mousex = 0, mousey = 0;  // mouse cordinates in screen coordinates
-// float tmousex = 0, tmousey = 0;
-int screenw = 0, screenh = 0;
-int NearPixel_TooClose;  // Kinect depth NearPixel_TooClose maximum number of pixels 
-int NearPixel_TooFarOrNoise; // Kinect threshold to cut noise
-int freenect_log_level = 0; //DEBUG =(5) 	ERROR =(1) 	FATAL =(0) 	FLOOD =(7) 	INFO =(4) 	NOTICE =(3) SPEW =(6) 	WARNING =(2)
-int freenect_angle = -30;  //kinect inclination -30,30
-int freenect_led = 1;   //kinect led LED_OF= 0,    LED_GREEN  = 1,    LED_RED    = 2,    LED_YELLOW = 3, (actually orange)   LED_BLINK_YELLOW = 4, (actually orange)   LED_BLINK_GREEN = 5,   LED_BLINK_RED_YELLOW = 6 (actually red/orange) 
-int gesture_click_area =15; // size of pause area
-int hovering_threshold=15; // How many  iterations to wait to determine a click
-int near_threshold, far_threshold; // depth threshold that indicate object nearness/farness
-int MMM_Output_log = 1;  // Output program log info to stdout in json format
-int MMM_Output_status = 1;  // Output sensor status to stdout in json format
-int MMM_Output_clicks = 1;  // Output click  info to stdout in json format
-int MMM_Output_coords = 1;  // // Output coordinates info to stdout in json format
-int MMM_Output_swipes = 1;  // Output swipe info to stdout in json format
-int jsonout = 1; // output status output in json format to stdout
-int debug = 1;  // print verbose variables and display screens
-int debugstop = 0;  // stop at each debug info
-int stroke_x[1000],stroke_y[1000]; //We store all coordinates between two empty or invalid frames in this array
-int h_stroke_left2right_count, h_stroke_right2left_count, v_stroke_up2down_count, v_stroke_down2up_count; //stroke monotonouneness count: number of subsequent move in same direction.
-long h_stroke_left2right_sum, h_stroke_right2left_sum, v_stroke_up2down_sum, v_stroke_down2up_sum; //stroke monotonouneness count: sum of coordinates displacements of subsequent move in same direction.
-long h_sum,v_sum; // sum of horizontal or vertical coordinates
-float h_mean,v_mean,h_variance,v_variance; // horizontal / vertical mean; horizontal / vertical variance 
-long left2rightmul, right2leftmul, up2downmul, down2upmul;
-long h_varmax=100,v_varmax=100; // Maximum horizontal or vertical Variance to assess a sequence of points as a horizontal or vertical strike 
-int minimum_stroke_points,maximum_stroke_points; // minimum number of coordinates to evaluate a stroke
-// float ystretch = 1.4;  // y stretch factor (supposing kinect is above or below mirror)
-int ScreenCenterX=320, ScreenCenterY=240; // Point to measure distance from hand (elbow)
-float DistCen[640][480]; // Precalculated Distances from Screen Center		
-int current_hovering_cycles = 0; // The current number of subsequent frames we are hovering over an hovering area
-int PointerX = 0, PointerY = 0; // need we to say what this is?
-int ShowScreen; // Display Camera and Depth Camera if 1
-
-pthread_cond_t gl_frame_cond = PTHREAD_COND_INITIALIZER;
-int got_frames = 0;
- // Current number of points in stroke between invalid of blank frames; initialized at 0 at 
- // beginning of program and after blank or invalid screen or click
-int current_pixel=0;
- // Number of points in stroke between invalid of blank frames; initialized at 0 at 
- // beginning of program, end of stroke ( blank or invalid screen or click)
-int StrokeEval=0; // Flag: evaluate swipe if set to 1
+// The selected code is redundant and can be deleted as these variables are already part of the KinectMouseState struct.
 
 //Median Calculation Functions
 
@@ -324,24 +401,24 @@ int mediantest(int argc, char* argv[])
 
 void DrawGLScene()
 {
-	pthread_mutex_lock(&gl_backbuf_mutex);
+	pthread_mutex_lock(&state.gl_backbuf_mutex);
 
-	while (got_frames < 2) {
-		pthread_cond_wait(&gl_frame_cond, &gl_backbuf_mutex);
+	while (state.got_frames < 2) {
+		pthread_cond_wait(&state.gl_frame_cond, &state.gl_backbuf_mutex);
 	}
 
-	memcpy(gl_depth_front, gl_depth_back, sizeof(gl_depth_back));
-	memcpy(gl_rgb_front, gl_rgb_back, sizeof(gl_rgb_back));
-	got_frames = 0;
-	pthread_mutex_unlock(&gl_backbuf_mutex);
+	memcpy(state.gl_depth_front, state.gl_depth_back, sizeof(state.gl_depth_back));
+	memcpy(state.gl_rgb_front, state.gl_rgb_back, sizeof(state.gl_rgb_back));
+	state.got_frames = 0;
+	pthread_mutex_unlock(&state.gl_backbuf_mutex);
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glLoadIdentity();
 
 	glEnable(GL_TEXTURE_2D);
 
-	glBindTexture(GL_TEXTURE_2D, gl_depth_tex);
-	glTexImage2D(GL_TEXTURE_2D, 0, 3, 640, 480, 0, GL_RGB, GL_UNSIGNED_BYTE, gl_depth_front);
+	glBindTexture(GL_TEXTURE_2D, state.gl_depth_tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, 3, 640, 480, 0, GL_RGB, GL_UNSIGNED_BYTE, state.gl_depth_front);
 
 	glTranslated(1280, 0, 0);
 	glScalef(-1, 1, 1);
@@ -354,8 +431,8 @@ void DrawGLScene()
 	glTexCoord2f(0, 1); glVertex3f(0,480,0);
 	glEnd();
 
-	glBindTexture(GL_TEXTURE_2D, gl_rgb_tex);
-	glTexImage2D(GL_TEXTURE_2D, 0, 3, 640, 480, 0, GL_RGB, GL_UNSIGNED_BYTE, gl_rgb_front);
+	glBindTexture(GL_TEXTURE_2D, state.gl_rgb_tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, 3, 640, 480, 0, GL_RGB, GL_UNSIGNED_BYTE, state.gl_rgb_front);
 
 	glBegin(GL_TRIANGLE_FAN);
 	glColor4f(255.0f, 255.0f, 255.0f, 255.0f);
@@ -372,61 +449,61 @@ void keyPressed(unsigned char key, int x, int y)
 {
 	switch(key) {
 		case 27:
-			die = 1;
-			pthread_join(freenect_thread, NULL);
-			glutDestroyWindow(window);
+			state.die = 1;
+			pthread_join(state.freenect_thread, NULL);
+			glutDestroyWindow(state.window);
 			pthread_exit(NULL);
 		break;
 		case 'w':
-			if (freenect_angle < 29) freenect_angle++;
-			freenect_set_tilt_degs(f_dev,freenect_angle);
-			printf("{ \"status\" : \"Angle: %d degrees\"}\n", freenect_angle);
+			if (state.config.freenect_angle < 29) state.config.freenect_angle++;
+			freenect_set_tilt_degs(state.f_dev,state.config.freenect_angle);
+			printf("{ \"status\" : \"Angle: %d degrees\"}\n", state.config.freenect_angle);
 		break;
 		case 's':
-			freenect_angle = 0;
-			freenect_set_tilt_degs(f_dev,freenect_angle);
-			printf("{ \"status\" : \"Angle: %d degrees\"}\n", freenect_angle);
+			state.config.freenect_angle = 0;
+			freenect_set_tilt_degs(state.f_dev,state.config.freenect_angle);
+			printf("{ \"status\" : \"Angle: %d degrees\"}\n", state.config.freenect_angle);
 		break;
 		case 'x':
-			if (freenect_angle > -30) freenect_angle--;
-			freenect_set_tilt_degs(f_dev,freenect_angle);
-			printf("{ \"status\" : \"Angle: %d degrees\"}\n", freenect_angle);
+			if (state.config.freenect_angle > -30) state.config.freenect_angle--;
+			freenect_set_tilt_degs(state.f_dev,state.config.freenect_angle);
+			printf("{ \"status\" : \"Angle: %d degrees\"}\n", state.config.freenect_angle);
 		break;
 		case '1':
-			freenect_set_led(f_dev,LED_GREEN);
+			freenect_set_led(state.f_dev,LED_GREEN);
 			printf("{ \"status\" : \"LED Green\"}\n");
 		break;
 		case '2':
-			freenect_set_led(f_dev,LED_RED);
+			freenect_set_led(state.f_dev,LED_RED);
 			printf("{ \"status\" : \"LED Red\"}\n");
 		break;
 		case '3':
-			freenect_set_led(f_dev,LED_YELLOW);
+			freenect_set_led(state.f_dev,LED_YELLOW);
 			printf("{ \"status\" : \"LED Yellow\"}\n");
 		break;
 		case '4':
-			freenect_set_led(f_dev,LED_BLINK_YELLOW);
+			freenect_set_led(state.f_dev,LED_BLINK_YELLOW);
 			printf("{ \"status\" : \"LED Blink Yellow\"}\n");
 		break;
 		case '5':
-			freenect_set_led(f_dev,LED_BLINK_GREEN);
+			freenect_set_led(state.f_dev,LED_BLINK_GREEN);
 			printf("{ \"status\" : \"LED Blink Green\"}\n");
 		break;
 		case '6':
-			freenect_set_led(f_dev,LED_BLINK_RED_YELLOW);
+			freenect_set_led(state.f_dev,LED_BLINK_RED_YELLOW);
 			printf("{ \"status\" : \"LED Blink Red Yellow\"}\n");
 		break;
 		case '0':
-			freenect_set_led(f_dev,LED_OFF);
+			freenect_set_led(state.f_dev,LED_OFF);
 			printf("{ \"status\" : \"LED Off\"}\n");
 		break;
 		case 'o':
-			tmprot+=0.1;
-			printf("{ \"status\" : \"Rotation: %d degrees\"}\n", tmprot);
+			state.tmprot+=0.1;
+			printf("{ \"status\" : \"Rotation: %d degrees\"}\n", state.tmprot);
 		break;
 		case 'p':
-			tmprot-=0.1;
-			printf("{ \"status\" : \"Rotation: %d degrees\"}\n", tmprot);
+			state.tmprot-=0.1;
+			printf("{ \"status\" : \"Rotation: %d degrees\"}\n", state.tmprot);
 		break;
 	}
 
@@ -450,31 +527,49 @@ void InitGL(int Width, int Height)
 	glEnable(GL_BLEND);
 	glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glShadeModel(GL_SMOOTH);
-	glGenTextures(1, &gl_depth_tex);
-	glBindTexture(GL_TEXTURE_2D, gl_depth_tex);
+	glGenTextures(1, &state.gl_depth_tex);
+	glBindTexture(GL_TEXTURE_2D, state.gl_depth_tex);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glGenTextures(1, &gl_rgb_tex);
-	glBindTexture(GL_TEXTURE_2D, gl_rgb_tex);
+	glGenTextures(1, &state.gl_rgb_tex);
+	glBindTexture(GL_TEXTURE_2D, state.gl_rgb_tex);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	ReSizeGLScene(Width, Height);
 }
 
+/// @brief 
+/// @param arg 
+/// @return 
+/**
+ * @brief Thread function for handling OpenGL rendering.
+ *
+ * This function is intended to be run as a separate thread. It handles
+ * the OpenGL rendering loop, updating the display based on the data
+ * provided through the argument.
+ *
+ * @param arg A pointer to the data required for the rendering loop.
+ *            The exact type and structure of this data should be
+ *            documented elsewhere in the code.
+ *
+ * @return A pointer to the result of the thread execution. The exact
+ *         type and meaning of this result should be documented
+ *         elsewhere in the code.
+ */
 void *gl_threadfunc(void *arg)
 {
-	if(jsonout && MMM_Output_log) printf("{ \"log\" : \"OpenGL Window Opened\"} \n");
-	if(debug) printf("OpenGL Window Opened\n");
-	glutInit(&g_argc, g_argv);
+	if(state.config.jsonout && state.config.MMM_Output_log) printf("{ \"log\" : \"OpenGL Window Opened\"} \n");
+	if(state.config.debug) printf("OpenGL Window Opened\n");
+	glutInit(&state.g_argc, state.g_argv);
 	
 	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA | GLUT_DEPTH);
 	glutInitWindowPosition(-640, 0);
 	
-	if (!ShowScreen) 
+	if (!state.config.ShowScreen) 
 		glutInitWindowSize(1, 1);
 	else
 		glutInitWindowSize(1280, 480);
-	window = glutCreateWindow("Virtual Mouse for Magic Mirror");
+	state.window = glutCreateWindow("Virtual Mouse for Magic Mirror");
 
 	glutDisplayFunc(&DrawGLScene);
 	glutIdleFunc(&DrawGLScene);
@@ -515,10 +610,10 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 	int mx , my;  // mouse x and y coordinates
 	long NearPixelCount; // count of red pixels (near)
 	int pval,pmax; // pval is current pixel depth according to kinect sensor. pmax is the maximun pval found
-	pthread_mutex_lock(&gl_backbuf_mutex);
+	pthread_mutex_lock(&state.gl_backbuf_mutex);
 
-	if(debug) printf("___________________________BEGINOFRAME_________________________\n");
-	if(debug) printf("Got a Frame, Anlyzing it\n");
+	if(state.config.debug) printf("___________________________BEGINOFRAME_________________________\n");
+	if(state.config.debug) printf("Got a Frame, Anlyzing it\n");
 //
 //Loop all pixels of current frame and search for at least one near pixel
 //
@@ -593,26 +688,26 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 //		Near range pixels : red color
 
 // pval is the median of depth of 9 pixels centered at current pixel
-		if (pval < near_threshold )  // We found a NearPixel
+		if (pval < state.config.near_threshold)  // We found a NearPixel
 		{
-			gl_depth_back[3*i+0] = 255;
-			gl_depth_back[3*i+1] = 0;
-			gl_depth_back[3*i+2] = 0;
+			state.gl_depth_back[3*i+0] = 255; // Red component
+			state.gl_depth_back[3*i+1] = 0;   // Green component
+			state.gl_depth_back[3*i+2] = 0;   // Blue component
 			if (pval > pmax)  // new deeper pixel (i.e. near to screeen)
 			{ 
 				pmax=pval;
 				NearPixelX=tx;
 				NearPixelY=ty;
-				gl_depth_back[3*i+0] = 0;
-				gl_depth_back[3*i+1] = 255;
+				state.gl_depth_back[3*i+0] = 0;
+				state.gl_depth_back[3*i+1] = 255;
 			}			
 //			if (DistCen[tx][ty]>dpixelmax)  // Current Pixel found is furthest from screen center: update
 //			{ 
 //				dpixelmax=DistCen[tx][ty];
 //				NearPixelX=tx;
 //				NearPixelY=ty;
-//				gl_depth_back[3*i+0] = 0;
-//				gl_depth_back[3*i+1] = 255;
+//				state.gl_depth_back[3*i+0] = 0;
+//				state.gl_depth_back[3*i+1] = 255;
 //			}
 			NearPixelCount++;	// we accumulate number of near pixels
 			NearPixelXSum+=tx;  // we sum up x coordinates
@@ -624,22 +719,22 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 		}
 	
 //		Default: mid range pixels : white color
-		if (pval >= near_threshold  && pval < far_threshold)
+		if (pval >= state.config.near_threshold  && pval < state.config.far_threshold)
 		{
-			gl_depth_back[3*i+0] = 255;
-			gl_depth_back[3*i+1] = 255;
-			gl_depth_back[3*i+2] = 255;
+			state.gl_depth_back[3*i+0] = 255;
+			state.gl_depth_back[3*i+1] = 255;
+			state.gl_depth_back[3*i+2] = 255;
 		}	
 //		Default: far range pixels:  black color
-		if (pval >= far_threshold )
+		if (pval >= state.config.far_threshold )
 		{
-			gl_depth_back[3*i+0] = 0;
-			gl_depth_back[3*i+1] = 0;
-			gl_depth_back[3*i+2] = 0;
+			state.gl_depth_back[3*i+0] = 0;
+			state.gl_depth_back[3*i+1] = 0;
+			state.gl_depth_back[3*i+2] = 0;
 		}
 	}
 
-	if(debug)	printf("Frame Analyzed: NearPixelCount %d\n",NearPixelCount);
+	if(state.config.debug)	printf("Frame Analyzed: NearPixelCount %d\n",NearPixelCount);
 //
 //End of : Loop all pixels of current frame and search for at least one near pixel
 //
@@ -649,21 +744,21 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 // Number of Pixels in Near Blobs is over the threshold NearPixel_TooClose given in input
 // This means the subject is too close in current frame
 // Reset Pixel Count and restart swipe evaluation
-	if(NearPixelCount > NearPixel_TooClose)   
+	if(NearPixelCount > state.config.NearPixel_TooClose)   
 	{	 
-    	if(debug)	printf("Subject too close\n");
-		if(jsonout && MMM_Output_status)	printf("{ \"status\" : \"tooclose\"\n}"	);
-		StrokeEval=1;
+    	if(state.config.debug)	printf("Subject too close\n");
+		if(state.config.jsonout && state.config.MMM_Output_status)	printf("{ \"status\" : \"tooclose\"\n}"	);
+		state.StrokeEval=1;
 	}
 
 // Number of Pixels in Near Blobs is less then threshold NearPixel_TooFarOrNoise given in input but non zero
 // This means the subject is within reach but still too far
 // Reset Pixel Count and restart swipe evaluation 
-	if(NearPixelCount > 0 && NearPixelCount < NearPixel_TooFarOrNoise)  
+	if(NearPixelCount > 0 && NearPixelCount < state.config.NearPixel_TooFarOrNoise)  
 	{
-    	if(debug)	printf("Some pixels detected but subject too far\n");
-		if(jsonout && MMM_Output_status) printf("{ \"status\" : \"somepixels\" }\n" );
-		StrokeEval=1;
+    	if(state.config.debug)	printf("Some pixels detected but subject too far\n");
+		if(state.config.jsonout && state.config.MMM_Output_status) printf("{ \"status\" : \"somepixels\" }\n" );
+		state.StrokeEval=1;
 	}
 
 // No near Pixel found
@@ -671,9 +766,9 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 // Reset Pixel Count and restart swipe evaluation 
 	if(NearPixelCount == 0)  
 	{
-    	if(debug)	printf("Subject too far - Out of reach\n");
-		if(jsonout && MMM_Output_status)	printf("{ \"status\" : \"toofar\"}\n" );
-		StrokeEval=1;
+    	if(state.config.debug)	printf("Subject too far - Out of reach\n");
+		if(state.config.jsonout && state.config.MMM_Output_status)	printf("{ \"status\" : \"toofar\"}\n" );
+		state.StrokeEval=1;
 	}
 
 // Number of NearPixels in blobs found is neither to small nor too big: subject hand in range
@@ -681,233 +776,233 @@ void depth_cb(freenect_device *dev, void *v_depth, uint32_t timestamp)
 // that is : an empty frame (a frame with subject either too far or too close) is considered as a "break" between gestures
 // We record x and y coordinates of pixels found in an array
 // Begin of section: analyze blob of nearpixels
-	if (NearPixelCount !=0 && NearPixelCount < NearPixel_TooClose && NearPixelCount > NearPixel_TooFarOrNoise)  
+	if (NearPixelCount !=0 && NearPixelCount < state.config.NearPixel_TooClose && NearPixelCount > state.config.NearPixel_TooFarOrNoise)  
 	{		
-		pointerx = ((NearPixelX-640.0f) / -1); 		// get current x coordinates
-		pointery = (NearPixelY);					// get current y coordinates
-		mousex = ((pointerx / 630.0f) * screenw);	// scale x coordinates to screen size
-		mousey = ((pointery / 470.0f) * screenh);	// scale y coordinates to screen size
-		mx = mousex;			
-		my = mousey;
-    	if(debug)
+		state.pointerx = ((NearPixelX-640.0f) / -1); 		// get current x coordinates
+		state.pointery = (NearPixelY);					// get current y coordinates
+		state.mousex = ((state.pointerx / 630.0f) * state.screenw);	// scale x coordinates to screen size
+		state.mousey = ((state.pointery / 470.0f) * state.screenh);	// scale y coordinates to screen size
+		mx = state.mousex;			
+		my = state.mousey;
+    	if(state.config.debug)
     	{ 
     		printf("Subject within range\n");
     		printf("Mouse coordinates  %3d %4d\n",mx,my);
-    		printf("Stroke Index  %d \n",current_pixel);
+    		printf("Stroke Index  %d \n",state.current_pixel);
     	}
-		stroke_x[current_pixel]=mx; //save current x coord in array of stroke pints
-		stroke_y[current_pixel]=my; //save cuurent y coord in array of stroke pints
-		if(jsonout && MMM_Output_clicks)	printf("{ \"coord\" : { \"xy\" : \"[ %d , %d]\" }}\n",mx,my );
+		state.stroke_x[state.current_pixel]=mx; //save current x coord in array of stroke pints
+		state.stroke_y[state.current_pixel]=my; //save cuurent y coord in array of stroke pints
+		if(state.config.jsonout && state.config.MMM_Output_clicks)	printf("{ \"coord\" : { \"xy\" : \"[ %d , %d]\" }}\n",mx,my );
 // This is the first point between invalid or empty frames: reset swipe evaluation support variables
-		if(current_pixel==0) 
+		if(state.current_pixel==0) 
 		{  
-	    	if(debug)	printf("First Point in stroke - reset swipe variables\n");
-			h_stroke_left2right_count=0;
-			h_stroke_right2left_count=0;
-			v_stroke_up2down_count=0;
-			v_stroke_down2up_count=0;
-			h_stroke_left2right_sum=0;
-			h_stroke_right2left_sum=0;
-			v_stroke_up2down_sum=0;
-			v_stroke_down2up_sum=0;
-			h_sum=0;
-			v_sum=0;
-			h_mean=mx;
-			v_mean=my;
-			h_variance=0;
-			v_variance=0;
-			left2rightmul=0;
-			right2leftmul=0;
-			up2downmul=0;
-			down2upmul=0;
-			StrokeEval=0;
+	    	if(state.config.debug)	printf("First Point in stroke - reset swipe variables\n");
+			state.h_stroke_left2right_count=0;
+			state.h_stroke_right2left_count=0;
+			state.v_stroke_up2down_count=0;
+			state.v_stroke_down2up_count=0;
+			state.h_stroke_left2right_sum=0;
+			state.h_stroke_right2left_sum=0;
+			state.v_stroke_up2down_sum=0;
+			state.v_stroke_down2up_sum=0;
+			state.h_sum=0;
+			state.v_sum=0;
+			state.h_mean=mx;
+			state.v_mean=my;
+			state.h_variance=0;
+			state.v_variance=0;
+			state.left2rightmul=0;
+			state.right2leftmul=0;
+			state.up2downmul=0;
+			state.down2upmul=0;
+			state.StrokeEval=0;
 		} 
 		else // this is an additional point in a stroke. Update swipe statistics variables
 		{  
-    		if(debug)	printf("Update  swipe variables\n");
-    		if (stroke_x[current_pixel]>stroke_x[current_pixel-1]) 
+    		if(state.config.debug)	printf("Update  swipe variables\n");
+    		if (state.stroke_x[state.current_pixel]>state.stroke_x[state.current_pixel-1]) 
     		{ 
-    			h_stroke_left2right_count++;
-    			h_stroke_left2right_sum += abs(stroke_x[current_pixel]-stroke_x[current_pixel-1]);
+    			state.h_stroke_left2right_count++;
+    			state.h_stroke_left2right_sum += abs(state.stroke_x[state.current_pixel]-state.stroke_x[state.current_pixel-1]);
     		}  
     		else 
     		{
-    			h_stroke_right2left_count++;
-    			h_stroke_right2left_sum += abs(stroke_x[current_pixel-1]-stroke_x[current_pixel]);
+    			state.h_stroke_right2left_count++;
+    			state.h_stroke_right2left_sum += abs(state.stroke_x[state.current_pixel-1]-state.stroke_x[state.current_pixel]);
     		}
-    		if(stroke_y[current_pixel]>stroke_y[current_pixel-1]) 
+    		if(state.stroke_y[state.current_pixel]>state.stroke_y[state.current_pixel-1]) 
     		{
-    			v_stroke_up2down_count++;
-    			v_stroke_up2down_sum+=abs(stroke_y[current_pixel-1]-stroke_y[current_pixel]);
+    			state.v_stroke_up2down_count++;
+    			state.v_stroke_up2down_sum+=abs(state.stroke_y[state.current_pixel-1]-state.stroke_y[state.current_pixel]);
     		}  
     		else 
     		{	
-    			v_stroke_down2up_count++;
-    			v_stroke_down2up_sum+=abs(stroke_y[current_pixel]-stroke_y[current_pixel-1]);
+    			state.v_stroke_down2up_count++;
+    			state.v_stroke_down2up_sum+=abs(state.stroke_y[state.current_pixel]-state.stroke_y[state.current_pixel-1]);
     		}
 		}
-    	h_sum+=stroke_x[current_pixel];
-   		v_sum+=stroke_y[current_pixel];
-   		if(debug)
+    	state.h_sum+=state.stroke_x[state.current_pixel];
+   		state.v_sum+=state.stroke_y[state.current_pixel];
+   		if(state.config.debug)
    		{ 
-   			printf("Deltas: \tH %4d \tV %4d\n",abs(stroke_x[current_pixel-1]-stroke_x[current_pixel]),abs(stroke_y[current_pixel-1]-stroke_y[current_pixel]));
-   			printf("Counts: \tL2R %5d\tR2L %5d\tU2D %5d\tD2U %5d\n",h_stroke_left2right_count,h_stroke_right2left_count,v_stroke_up2down_count,v_stroke_down2up_count);
-   			printf("StrokeSums: \tL2R %5d\tR2L %5d\tU2D %5d\tD2U %5d\n",h_stroke_left2right_sum,h_stroke_right2left_sum,v_stroke_up2down_sum,v_stroke_down2up_sum);
-   			printf("HSUm VSUM: \tHsum %10d\tVSum %10d\n",h_sum,v_sum);
+   			printf("Deltas: \tH %4d \tV %4d\n",abs(state.stroke_x[state.current_pixel-1]-state.stroke_x[state.current_pixel]),abs(state.stroke_y[state.current_pixel-1]-state.stroke_y[state.current_pixel]));
+   			printf("Counts: \tL2R %5d\tR2L %5d\tU2D %5d\tD2U %5d\n",state.h_stroke_left2right_count,state.h_stroke_right2left_count,state.v_stroke_up2down_count,state.v_stroke_down2up_count);
+   			printf("StrokeSums: \tL2R %5d\tR2L %5d\tU2D %5d\tD2U %5d\n",state.h_stroke_left2right_sum,state.h_stroke_right2left_sum,state.v_stroke_up2down_sum,state.v_stroke_down2up_sum);
+   			printf("HSUm VSUM: \tHsum %10d\tVSum %10d\n",state.h_sum,state.v_sum);
    		}
 
 // If current evaluated pixel coordinates are within square area defined by input parameter gesture_click_area
 // Increment the hovering counter and reset Stroke index  		StrokeSums
-		if ((PointerX <= (mx + gesture_click_area))  && (PointerX >= (mx -gesture_click_area)) && (PointerY <= (my + gesture_click_area))  && (PointerY >= (my - gesture_click_area))) 
+		if ((state.PointerX <= (mx + state.config.gesture_click_area))  && (state.PointerX >= (mx -state.config.gesture_click_area)) && (state.PointerY <= (my + state.config.gesture_click_area))  && (state.PointerY >= (my - state.config.gesture_click_area))) 
 		{
-			current_hovering_cycles++;
-	    	if(debug)	printf("Mouse Hovering : Current hovering cycle %3d\n",current_hovering_cycles);
+			state.current_hovering_cycles++;
+	    	if(state.config.debug)	printf("Mouse Hovering : Current hovering cycle %3d\n",state.current_hovering_cycles);
 		} 
 		else  
 // Current evaluated pixel coordinates are not within square area defined by input parameter gesture_click_area
 // Reset the hovering counter and increment stroke pixel index   			
 		{
-			PointerX = mx; //New initial position X
-			PointerY = my; //New initial position Y
-			current_hovering_cycles = 0; // Restart counting current_hovering_cycles
+			state.PointerX = mx; //New initial position X
+			state.PointerY = my; //New initial position Y
+			state.current_hovering_cycles = 0; // Restart counting current_hovering_cycles
 		}		
-		current_pixel++;
+		state.current_pixel++;
 // Check if mouse was hovering for more then hovering_threshold subsequent frames over the click area
 // Simulate click at the point
 // Set debounce count to avoid double clicks    			
-		if(current_hovering_cycles > hovering_threshold) 
+		if(state.current_hovering_cycles > state.config.hovering_threshold) 
 		{
-			current_hovering_cycles = -hovering_threshold*2;  		// set debounce count
-			XTestFakeButtonEvent(display, 1, TRUE, CurrentTime);  	// send mouse lmb down 
-			XTestFakeButtonEvent(display, 1, FALSE, CurrentTime);	// send mouse lmb up
-			current_pixel=0;  //Reset Stroke Pixel Index 
-			StrokeEval=0;
-	    	if(debug)	printf("Click at \tX %d\tY %dn",mx,my);
-			if(jsonout && MMM_Output_clicks)	printf("{ \"click\" : { \"xy\" : \"[ %d , %d]\" }}\n",mx,my );
+			state.current_hovering_cycles = -state.config.hovering_threshold*2;  		// set debounce count
+			XTestFakeButtonEvent(state.display, 1, TRUE, CurrentTime);  	// send mouse lmb down 
+			XTestFakeButtonEvent(state.display, 1, FALSE, CurrentTime);	// send mouse lmb up
+			state.current_pixel=0;  //Reset Stroke Pixel Index 
+			state.StrokeEval=0;
+	    	if(state.config.debug)	printf("Click at \tX %d\tY %dn",mx,my);
+			if(state.config.jsonout && state.config.MMM_Output_clicks)	printf("{ \"click\" : { \"xy\" : \"[ %d , %d]\" }}\n",mx,my );
 		}
-		XTestFakeMotionEvent(display, -1, mx, my, CurrentTime);		// send mouse movement
-		if(debug)	printf("Coordinates \tX %3d\tY %3d\n",mx,my);
-//		if(jsonout && MMM_Output_coords)	printf("{ \"coords\" : { \"xy\" : \"[ %d , %d]\" }}\n",mx,my );
-		XSync(display, 0);
+		XTestFakeMotionEvent(state.display, -1, mx, my, CurrentTime);		// send mouse movement
+		if(state.config.debug)	printf("Coordinates \tX %3d\tY %3d\n",mx,my);
+//		if(state.jsonout && state.MMM_Output_coords)	printf("{ \"coords\" : { \"xy\" : \"[ %d , %d]\" }}\n",mx,my );
+		XSync(state.display, 0);
 	}
 	// End of section: analyze blob of nearpixels
 
 // begin of section: Evaluate Swipe if frame empty or not in threshold 
-	if(StrokeEval)
+	if(state.StrokeEval)
 	{
 // Begin of section: We have a sequence of points that are between the allowed paramenters set
-		if (current_pixel>minimum_stroke_points && current_pixel<maximum_stroke_points) 
+		if (state.current_pixel>state.config.minimum_stroke_points && state.current_pixel<state.config.maximum_stroke_points) 
 		{
-			h_mean=h_sum/current_pixel;  //calculate statistics for euristic
-			v_mean=v_sum/current_pixel;
-			for (j=0;j<current_pixel;j++)	
+			state.h_mean=state.h_sum/state.current_pixel;  //calculate statistics for euristic
+			state.v_mean=state.v_sum/state.current_pixel;
+			for (j=0;j<state.current_pixel;j++)	
 			{
-				h_variance+=pow(stroke_x[j]-h_mean,2);
-				v_variance+=pow(stroke_y[j]-v_mean,2);
-				if(debug) printf("N X Y \t%3d\t%3d\t%4d\n",j, stroke_x[j],stroke_y[j]);
+				state.h_variance+=pow(state.stroke_x[j]-state.h_mean,2);
+				state.v_variance+=pow(state.stroke_y[j]-state.v_mean,2);
+				if(state.config.debug) printf("N X Y \t%3d\t%3d\t%4d\n",j, state.stroke_x[j],state.stroke_y[j]);
 			}
-			h_variance=sqrt(h_variance/current_pixel);
-			v_variance=sqrt(v_variance/current_pixel);
-			left2rightmul = h_stroke_left2right_count*h_stroke_left2right_sum;
-			right2leftmul = h_stroke_right2left_count*h_stroke_right2left_sum;
-			up2downmul = v_stroke_up2down_count*v_stroke_up2down_sum;
-			down2upmul = v_stroke_down2up_count*v_stroke_down2up_sum;
-			if(debug)
+			state.h_variance=sqrt(state.h_variance/state.current_pixel);
+			state.v_variance=sqrt(state.v_variance/state.current_pixel);
+			state.left2rightmul = state.h_stroke_left2right_count*state.h_stroke_left2right_sum;
+			state.right2leftmul = state.h_stroke_right2left_count*state.h_stroke_right2left_sum;
+			state.up2downmul = state.v_stroke_up2down_count*state.v_stroke_up2down_sum;
+			state.down2upmul = state.v_stroke_down2up_count*state.v_stroke_down2up_sum;
+			if(state.config.debug)
 			{ 
 				printf("____________________________________________\n");
-				printf("current_pixel, %i\n",current_pixel);
-				printf("left2rightcnt\tright2leftcnt\t%8i\t%8i\n",h_stroke_left2right_count, h_stroke_right2left_count);
-				printf("up2downcnt\tdown2upcnt\t%8i\t%8i\n\n",v_stroke_up2down_count,v_stroke_down2up_count);
-				printf("left2rightsum\tright2leftsum\t%8i\t%8i\n",h_stroke_left2right_sum, h_stroke_right2left_sum);
-				printf("up2downsum\tdown2up_sum\t%8i\t%8i\n\n",v_stroke_up2down_sum,v_stroke_down2up_sum);
-				printf("left2rightmul\tright2leftmul\t%20d\t%20d\n",left2rightmul,right2leftmul);
-				printf("up2downmul\tdown2upmul\t%20d\t%20d\n\n",up2downmul,down2upmul);
-				printf("h_mean\tv_mean\t%5.5f\t%5.5f\n",h_mean,v_mean);
-				printf("h_variance\tv_variance\t%5.5f\t%5.5f\n",h_variance,v_variance);
+				printf("state.current_pixel, %i\n",state.current_pixel);
+				printf("left2rightcnt\tright2leftcnt\t%8i\t%8i\n",state.h_stroke_left2right_count, state.h_stroke_right2left_count);
+				printf("up2downcnt\tdown2upcnt\t%8i\t%8i\n\n",state.v_stroke_up2down_count,state.v_stroke_down2up_count);
+				printf("left2rightsum\tright2leftsum\t%8i\t%8i\n",state.h_stroke_left2right_sum, state.h_stroke_right2left_sum);
+				printf("up2downsum\tdown2up_sum\t%8i\t%8i\n\n",state.v_stroke_up2down_sum,state.v_stroke_down2up_sum);
+				printf("left2rightmul\tright2leftmul\t%20d\t%20d\n",state.left2rightmul,state.right2leftmul);
+				printf("up2downmul\tdown2upmul\t%20d\t%20d\n\n",state.up2downmul,state.down2upmul);
+				printf("h_mean\tv_mean\t%5.5f\t%5.5f\n",state.h_mean,state.v_mean);
+				printf("h_variance\tv_variance\t%5.5f\t%5.5f\n",state.h_variance,state.v_variance);
 				printf("____________________________________________\n");
 			}
-			if (h_variance<h_varmax || v_variance<v_varmax)  // Either Variance is belo variance threshold parameter
+			if (state.h_variance<state.config.h_varmax || state.v_variance<state.config.v_varmax)  // Either Variance is belo variance threshold parameter
 			{
-				if (h_variance<h_varmax && v_variance<v_varmax)
+				if (state.h_variance<state.config.h_varmax && state.v_variance<state.config.v_varmax)
 				{ 
-					if(debug) printf("Garbage ");
+					if(state.config.debug) printf("Garbage ");
 				}
 				else
 				{ 
-					if(h_variance<v_variance)
+					if(state.h_variance<state.v_variance)
 				   	{ 
-						if(debug) if(up2downmul>down2upmul) printf("Down \n"); else printf("Up \n");				
-						if(jsonout && MMM_Output_swipes) if(up2downmul>down2upmul) printf("{ \"swipe\" : \"down\" }\n" ); else printf("{ \"swipe\" : \"up\" }\n" );				
+						if(state.config.debug) if(state.up2downmul>state.down2upmul) printf("Down \n"); else printf("Up \n");				
+						if(state.config.jsonout && state.config.MMM_Output_swipes) if(state.up2downmul>state.down2upmul) printf("{ \"swipe\" : \"down\" }\n" ); else printf("{ \"swipe\" : \"up\" }\n" );				
 				   	}
 				   	else
 				   	{ 
-				   		if(debug) if(left2rightmul>right2leftmul) printf("right \n"); else printf("left \n");				
-						if(jsonout && MMM_Output_swipes) if(left2rightmul>right2leftmul)	printf("{ \"swipe\" : \"right\" }\n" ); else printf("{ \"swipe\" : \"left\" }\n" );				
+				   		if(state.config.debug) if(state.left2rightmul>state.right2leftmul) printf("right \n"); else printf("left \n");				
+						if(state.config.jsonout && state.config.MMM_Output_swipes) if(state.left2rightmul>state.right2leftmul)	printf("{ \"swipe\" : \"right\" }\n" ); else printf("{ \"swipe\" : \"left\" }\n" );				
 				   	}
 				}
 			}	
 			else
 			{
-					if(debug) printf("No Swipe\n");
+					if(state.config.debug) printf("No Swipe\n");
 			}	
 		}  // End of section: We have a sequence of points that are between the allowed paramenters 
-		if(debugstop) getchar();
-		StrokeEval=0;
-		current_pixel=0;
+		if(state.config.debugstop) getchar();
+		state.StrokeEval=0;
+		state.current_pixel=0;
 	}
 	// end of section: Evaluate Swipe if frame empty or not in threshold 
 		
-	got_frames++;
-	pthread_cond_signal(&gl_frame_cond);
-	pthread_mutex_unlock(&gl_backbuf_mutex);
-	if(debug) printf("___________________________ENDOFRAME_________________________\n\n");
+	state.got_frames++;
+	pthread_cond_signal(&state.gl_frame_cond);
+	pthread_mutex_unlock(&state.gl_backbuf_mutex);
+	if(state.config.debug) printf("___________________________ENDOFRAME_________________________\n\n");
 }
 
 void rgb_cb(freenect_device *dev, void *rgb, uint32_t timestamp)
 {
-	pthread_mutex_lock(&gl_backbuf_mutex);
-	got_frames++;
-	memcpy(gl_rgb_back, rgb, FREENECT_VIDEO_RGB_SIZE);
-	pthread_cond_signal(&gl_frame_cond);
-	pthread_mutex_unlock(&gl_backbuf_mutex);
+	pthread_mutex_lock(&state.gl_backbuf_mutex);
+	state.got_frames++;
+	memcpy(state.gl_rgb_back, rgb, FREENECT_VIDEO_RGB_SIZE);
+	pthread_cond_signal(&state.gl_frame_cond);
+	pthread_mutex_unlock(&state.gl_backbuf_mutex);
 }
 
 void *freenect_threadfunc(void *arg)
 {
-	freenect_set_tilt_degs(f_dev,freenect_angle);
-	freenect_set_led(f_dev,freenect_led);
-	freenect_set_depth_callback(f_dev, depth_cb);
-	freenect_set_video_callback(f_dev, rgb_cb);
-	freenect_set_video_buffer(f_dev, FREENECT_VIDEO_RGB);  
-	freenect_set_depth_buffer(f_dev, FREENECT_DEPTH_11BIT);
+	freenect_set_tilt_degs(state.f_dev, state.config.freenect_angle);
+	freenect_set_led(state.f_dev, state.config.freenect_led);
+	freenect_set_depth_callback(state.f_dev, depth_cb);
+	freenect_set_video_callback(state.f_dev, rgb_cb);
+	freenect_set_video_buffer(state.f_dev, FREENECT_VIDEO_RGB);  
+	freenect_set_depth_buffer(state.f_dev, FREENECT_DEPTH_11BIT);
 
-	freenect_start_depth(f_dev);
-	freenect_start_video(f_dev);
+	freenect_start_depth(state.f_dev);
+	freenect_start_video(state.f_dev);
 
 	//printf("'W'-Tilt Up, 'S'-Level, 'X'-Tilt Down, '0'-'6'-LED Mode\n");
 
-	while(!die && freenect_process_events(f_ctx) >= 0 )
+	while(!state.die && freenect_process_events(state.f_ctx) >= 0 )
 	{
-		freenect_raw_tilt_state* state;
-		freenect_update_tilt_state(f_dev);
-		state = freenect_get_tilt_state(f_dev);;
+		freenect_raw_tilt_state* tilt_state;
+		freenect_update_tilt_state(state.f_dev);
+		tilt_state = freenect_get_tilt_state(state.f_dev);;
 		double dx,dy,dz;
-		freenect_get_mks_accel(state, &dx, &dy, &dz);
+		freenect_get_mks_accel(tilt_state, &dx, &dy, &dz);
 		//printf("\r raw acceleration: %4d %4d %4d  mks acceleration: %4f %4f %4f\r", ax, ay, az, dx, dy, dz);
 		fflush(stdout);
 	}
 
 	
-	if(jsonout && MMM_Output_log) printf("{ \"log\" : \"Start Shutting Down Streams\"}\n");
-	if(debug) printf("Start Shutting Down Streams");
+	if(state.config.jsonout && state.config.MMM_Output_log) printf("{ \"log\" : \"Start Shutting Down Streams\"}\n");
+	if(state.config.debug) printf("Start Shutting Down Streams");
 
-	freenect_stop_depth(f_dev);
-	freenect_stop_video(f_dev);
+	freenect_stop_depth(state.f_dev);
+	freenect_stop_video(state.f_dev);
 
-	freenect_close_device(f_dev);
-	freenect_shutdown(f_ctx);
-	if(jsonout) printf("{ \"log\" : \"Done Shutting Down Streams\"}\n");
-	if(debug) printf("Done Shutting Down Streams");
+	freenect_close_device(state.f_dev);
+	freenect_shutdown(state.f_ctx);
+	if(state.config.jsonout && state.config.MMM_Output_log) printf("{ \"log\" : \"Done Shutting Down Streams\"}\n");
+	if(state.config.debug) printf("Done Shutting Down Streams");
 	return NULL;
 }
 
@@ -919,7 +1014,7 @@ int main(int argc, char **argv)
     if ((argc != 25) || ((argc == 1) && strcmp (argv[1],"--help")))
 	{
 		if (argc!=25)
-			if (jsonout && MMM_Output_log) 	printf("{ \"log\" : \"Wrong Number of Parameters: %2d \"}\n",argc);
+			if (state.config.jsonout && state.config.MMM_Output_log) 	printf("{ \"log\" : \"Wrong Number of Parameters: %2d \"}\n",argc);
 		printf("Number of Parameters %2d \n",argc);
 		printf("- NearPixel_TooClose: Number of maximum near pixel to accept before sending a too close message\n");
 		printf("- NearPixel_TooFarOrNoise: Number of minimum near pixel to accept as pointer (i.e. not noise)\n");
@@ -970,79 +1065,79 @@ int main(int argc, char **argv)
 //			printf("{ \"info\" : \"Send Swipe events %d\n", MMM_Output_swipes\"}\n");
 //			printf("{ \"info\" : \"Verbose debug %d\n", debug\"}\n");
 
-		NearPixel_TooClose = atoi(argv[1]);
-		NearPixel_TooFarOrNoise = atoi(argv[2]);
-		freenect_log_level = atoi(argv[3]); 
-		ShowScreen = atoi(argv[4]);
-		freenect_angle = atoi(argv[5]);
-		freenect_led = atoi(argv[6]);
-		gesture_click_area =atoi(argv[7]);
-		hovering_threshold = atoi(argv[8]);
-		minimum_stroke_points = atoi(argv[9]);
-		maximum_stroke_points = atoi(argv[10]);
-		h_varmax = atoi(argv[11]);
-		v_varmax = atoi(argv[12]);
-		near_threshold = atoi(argv[13]);
-		far_threshold = atoi(argv[14]);
-		ScreenCenterX = atoi(argv[15]);
-		ScreenCenterY = atoi(argv[16]); 
-		jsonout = atoi(argv[17]);
-		MMM_Output_status =  atoi(argv[18]);
-		MMM_Output_log = atoi(argv[19]);
-		MMM_Output_clicks =  atoi(argv[20]);
-		MMM_Output_coords = atoi(argv[21]);
-		MMM_Output_swipes = atoi(argv[22]); 
-		debug = atoi(argv[23]); 
-		debugstop = atoi(argv[24]); 
+		state.config.NearPixel_TooClose = atoi(argv[1]);
+		state.config.NearPixel_TooFarOrNoise = atoi(argv[2]);
+		state.config.freenect_log_level = atoi(argv[3]); 
+		state.config.ShowScreen = atoi(argv[4]);
+		state.config.freenect_angle = atoi(argv[5]);
+		state.config.freenect_led = atoi(argv[6]);
+		state.config.gesture_click_area =atoi(argv[7]);
+		state.config.hovering_threshold = atoi(argv[8]);
+		state.config.minimum_stroke_points = atoi(argv[9]);
+		state.config.maximum_stroke_points = atoi(argv[10]);
+		state.config.h_varmax = atoi(argv[11]);
+		state.config.v_varmax = atoi(argv[12]);
+		state.config.near_threshold = atoi(argv[13]);
+		state.config.far_threshold = atoi(argv[14]);
+		state.config.ScreenCenterX = atoi(argv[15]);
+		state.config.ScreenCenterY = atoi(argv[16]); 
+		state.config.jsonout = atoi(argv[17]);
+		state.config.MMM_Output_status =  atoi(argv[18]);
+		state.config.MMM_Output_log = atoi(argv[19]);
+		state.config.MMM_Output_clicks =  atoi(argv[20]);
+		state.config.MMM_Output_coords = atoi(argv[21]);
+		state.config.MMM_Output_swipes = atoi(argv[22]); 
+		state.config.debug = atoi(argv[23]); 
+		state.config.debugstop = atoi(argv[24]); 
 
-		if((jsonout && MMM_Output_log) || debug)	{
+		if((state.config.jsonout && state.config.MMM_Output_log) || state.config.debug)	{
 			printf("{ \"log\" : \"Kinect Mouse and Swipe starting\"}\n");
 			printf("{ \"log\" : \"Parsing Args\"}\n");
-			printf("{ \"log\" : \"NearPixel_TooClose %i \"}\n",NearPixel_TooClose);
-			printf("{ \"log\" : \"NearPixel_TooFarOrNoise %i \"}\n",NearPixel_TooFarOrNoise);
-			printf("{ \"log\" : \"KinectLogLevel %i \"}\n",freenect_log_level);
-			printf("{ \"log\" : \"KinectSwhowScreen %i \"}\n",ShowScreen);
-			printf("{ \"log\" : \"KinectAngle %i \" }\n",freenect_angle);
-			printf("{ \"log\" : \"KinectLed %i \" }\n",freenect_led);
-			printf("{ \"log\" : \"ClickSize %i \" }\n",gesture_click_area);
-			printf("{ \"log\" : \"ClickPauseCount %i \"}\n",hovering_threshold);
-			printf("{ \"log\" : \"minimum_stroke_points %i \"}\n",minimum_stroke_points);
-			printf("{ \"log\" : \"maximum_stroke_points %i \"}\n",maximum_stroke_points);
-			printf("{ \"log\" : \"horizontal variance threshold for swipe %i \"}\n",minimum_stroke_points);
-			printf("{ \"log\" : \"vertical variance threshold for swipe%i \"}\n",maximum_stroke_points);
-			printf("{ \"log\" : \"near_threshold: %i \"}\n" ,near_threshold);
-			printf("{ \"log\" : \"far_threshold: depth for far points %i \"}\n",far_threshold);
-			printf("{ \"log\" : \"ElbowX %i \"}\n",ScreenCenterX);
-			printf("{ \"log\" : \"ElbowY %i \"}\n", ScreenCenterY);
-			printf("{ \"log\" : \"JSon Output %d \"}\n", jsonout);
-			printf("{ \"log\" : \"Output status to stdout %d \"}\n", MMM_Output_status);
-			printf("{ \"log\" : \"Output log to stdout %d \"}\n", MMM_Output_log);
-			printf("{ \"log\" : \"Output Click events to stdout %d \"}\n", MMM_Output_clicks);
-			printf("{ \"log\" : \"Output Coordinates events to stdout %d \"}\n", MMM_Output_coords);
-			printf("{ \"log\" : \"Output Swipe events to stdout %d \"}\n", MMM_Output_swipes);
-			printf("{ \"log\" : \"Verbose debug %d \"}\n", debug);
-			printf("{ \"log\" : \"Verbose debug stop at swipe eval %d \"}\n", debugstop);
+			printf("{ \"log\" : \"NearPixel_TooClose %i \"}\n",state.config.NearPixel_TooClose);
+			printf("{ \"log\" : \"NearPixel_TooFarOrNoise %i \"}\n",state.config.NearPixel_TooFarOrNoise);
+			printf("{ \"log\" : \"KinectLogLevel %i \"}\n",state.config.freenect_log_level);
+			printf("{ \"log\" : \"KinectSwhowScreen %i \"}\n",state.config.ShowScreen);
+			printf("{ \"log\" : \"KinectAngle %i \" }\n",state.config.freenect_angle);
+			printf("{ \"log\" : \"KinectLed %i \" }\n",state.config.freenect_led);
+			printf("{ \"log\" : \"ClickSize %i \" }\n",state.config.gesture_click_area);
+			printf("{ \"log\" : \"ClickPauseCount %i \"}\n",state.config.hovering_threshold);
+			printf("{ \"log\" : \"minimum_stroke_points %i \"}\n",state.config.minimum_stroke_points);
+			printf("{ \"log\" : \"maximum_stroke_points %i \"}\n",state.config.maximum_stroke_points);
+			printf("{ \"log\" : \"horizontal variance threshold for swipe %i \"}\n",state.config.minimum_stroke_points);
+			printf("{ \"log\" : \"vertical variance threshold for swipe%i \"}\n",state.config.maximum_stroke_points);
+			printf("{ \"log\" : \"near_threshold: %i \"}\n" ,state.config.near_threshold);
+			printf("{ \"log\" : \"far_threshold: depth for far points %i \"}\n",state.config.far_threshold);
+			printf("{ \"log\" : \"ElbowX %i \"}\n",state.config.ScreenCenterX);
+			printf("{ \"log\" : \"ElbowY %i \"}\n", state.config.ScreenCenterY);
+			printf("{ \"log\" : \"JSon Output %d \"}\n", state.config.jsonout);
+			printf("{ \"log\" : \"Output status to stdout %d \"}\n", state.config.MMM_Output_status);
+			printf("{ \"log\" : \"Output log to stdout %d \"}\n", state.config.MMM_Output_log);
+			printf("{ \"log\" : \"Output Click events to stdout %d \"}\n", state.config.MMM_Output_clicks);
+			printf("{ \"log\" : \"Output Coordinates events to stdout %d \"}\n", state.config.MMM_Output_coords);
+			printf("{ \"log\" : \"Output Swipe events to stdout %d \"}\n", state.config.MMM_Output_swipes);
+			printf("{ \"log\" : \"Verbose debug %d \"}\n", state.config.debug);
+			printf("{ \"log\" : \"Verbose debug stop at swipe eval %d \"}\n", state.config.debugstop);
 		}
 	}
 	
 	
 	//mousemask(ALL_MOUSE_EVENTS, NULL);
-	if(jsonout && MMM_Output_log) printf("{ \"log\" : \"Opening Display\"}\n");
-	if(debug) printf("Opening display \n");
+	if(state.config.jsonout && state.config.MMM_Output_log) printf("{ \"log\" : \"Opening Display\"}\n");
+	if(state.config.debug) printf("Opening display \n");
 
-	display = XOpenDisplay(0);
+	state.display = XOpenDisplay(0);
 
 	// Careful: this will dump if not run from terminal directly on system running XServer 
-	root_window = (display);
+	state.root_window = (state.display);
 
-	screenw = XDisplayWidth(display, SCREEN);
-	screenh = XDisplayHeight(display, SCREEN);
+	state.screenw = XDisplayWidth(state.display, SCREEN);
+	state.screenh = XDisplayHeight(state.display, SCREEN);
 
-	if(jsonout && MMM_Output_log) printf("{ \"log\" : \"Default Display Found\"}\n{ \"log\" : \"Display Size %d %d }\n", screenw, screenh);
-	if(debug) printf("Default Display Found\nDisplay Size %d %d \n", screenw, screenh);
+	if(state.config.jsonout && state.config.MMM_Output_log) printf("{ \"log\" : \"Default Display Found\"}\n{ \"log\" : \"Display Size %d %d }\n", state.screenw, state.screenh);
+	if(state.config.debug) printf("Default Display Found\nDisplay Size %d %d \n", state.screenw, state.screenh);
 
-//	screenw += 200;
-//	screenh += 200;
+//	state.screenw += 200;
+//	state.screenh += 200;
 
 	int i,j;
 	for (i=0; i<2048; i++) {
@@ -1051,40 +1146,40 @@ int main(int argc, char **argv)
 		t_gamma[i] = v*6*256;
 	}
 
-	g_argc = argc;
-	g_argv = argv;
+	state.g_argc = argc;
+	state.g_argv = argv;
 
 	/* Precalculate all distances from Screen Center */
 	for (i=0; i<640;i++)
 			for (j=0; j<480;j++)
-				DistCen[i][j] = sqrt(pow(i-ScreenCenterX,2)+pow(j-ScreenCenterY,2));
+				state.DistCen[i][j] = sqrt(pow(i-state.config.ScreenCenterX,2)+pow(j-state.config.ScreenCenterY,2));
 
 	
-	if (freenect_init(&f_ctx, NULL) < 0) {
-		if (jsonout && MMM_Output_log) printf("{ \"log\" : \"freenect_init() failed\" }\n");
-		if (debug) printf("Error freenect_init() failed\n");
+	if (freenect_init(&state.f_ctx, NULL) < 0) {
+		if (state.config.jsonout && state.config.MMM_Output_log) printf("{ \"log\" : \"freenect_init() failed\" }\n");
+		if (state.config.debug) printf("Error freenect_init() failed\n");
 		return 1;
 	}
 
-	freenect_set_log_level(f_ctx, freenect_log_level);
+	freenect_set_log_level(state.f_ctx, state.config.freenect_log_level);
 
-	int nr_devices = freenect_num_devices (f_ctx);
-		if (jsonout && MMM_Output_log) printf("{ \"log\" : \"%d devices Found\" }\n", nr_devices);
-		if (debug) printf("%d devices Found\n", nr_devices);
+	int nr_devices = freenect_num_devices (state.f_ctx);
+		if (state.config.jsonout && state.config.MMM_Output_log) printf("{ \"log\" : \"%d devices Found\" }\n", nr_devices);
+		if (state.config.debug) printf("%d devices Found\n", nr_devices);
 	
 
 	int user_device_number = 0;
 
-	if (freenect_open_device(f_ctx, &f_dev, user_device_number) < 0) {
-		if (jsonout && MMM_Output_log) printf("{ \"log\" : \"No Kinect found\" \n}");
-		if (debug) printf("Error : No Kinect found\n");
+	if (freenect_open_device(state.f_ctx, &state.f_dev, user_device_number) < 0) {
+		if (state.config.jsonout && state.config.MMM_Output_log) printf("{ \"log\" : \"No Kinect found\" \n}");
+		if (state.config.debug) printf("Error : No Kinect found\n");
 		return 1;
 	}
 
-	res = pthread_create(&freenect_thread, NULL, freenect_threadfunc, NULL);
+	res = pthread_create(&state.freenect_thread, NULL, freenect_threadfunc, NULL);
 	if (res) {
-		if (jsonout && MMM_Output_log) printf("{ \"log\" : \"Could not create thread\" }\n");
-		if (debug) printf("Error could not create thread.\n");
+		if (state.config.jsonout && state.config.MMM_Output_log) printf("{ \"log\" : \"Could not create thread\" }\n");
+		if (state.config.debug) printf("Error could not create thread.\n");
 		return 1;
 	}
 
