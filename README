@@ -63,6 +63,12 @@ that's it.
 If as it should it compiled without errors copy the kmouse_mm binary file to your bin path to have it accessible anywhere.
 Dont't forget to make the compiled binary executable (chmod +x)
 
+# To compile the project in debug mode:
+mkdir -p build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Debug ..
+make
+
 The command accepts a veeery long list of parameters to tweak the output for your setup and debug:
 
 - NearPixel_TooClose: Number of maximum near pixel to accept before sending a too close message
@@ -114,5 +120,16 @@ docker run -it --rm \
   -w /app \
   kinectmouse:latest \
   bash -c "cmake . && make && ./onlydebug.sh"
+
+# To run the Docker container in interactive mode:
+docker run -it --rm \
+  -e DISPLAY=$DISPLAY \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  --device /dev/bus/usb:/dev/bus/usb \
+  --privileged \
+  -v $(pwd):/app \
+  -w /app \
+  kinectmouse:latest \
+  bash
 
 
