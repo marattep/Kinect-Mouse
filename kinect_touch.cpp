@@ -19,8 +19,8 @@
 using namespace std;
 
 // openCV
-#include <opencv/highgui.h>
-#include <opencv/cv.h>
+#include <opencv2/highgui.hpp>
+#include <opencv2/opencv.hpp>
 using namespace cv;
 
 // openNI

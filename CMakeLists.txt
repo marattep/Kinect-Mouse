@@ -3,6 +3,20 @@ cmake_minimum_required(VERSION 3.2)
 # Add the path to the custom CMake modules
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
+
+#add_executable(kmouse kinect_touch.cpp)
+#set(OpenCV_DIR ../build)
+#find_package(OpenCV REQUIRED)
+# find_package(OpenNI REQUIRED)
+# include_directories(${OPENNI_INCLUDE_DIRS})
+
+# include_directories(${OpenCV_INCLUDE_DIRS})
+# include_directories(
+#   "/usr/include/ni"
+#   "src/TUIO"
+#   "src/oscpack"
+# )
+
 add_executable(kmouse kinect_mouse_mm.c)
 
 find_package(Threads REQUIRED)

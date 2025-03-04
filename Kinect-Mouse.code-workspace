@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "KinectTouch",
+			"path": "../KinectTouch"
+		}
+	],
+	"settings": {}
+}
