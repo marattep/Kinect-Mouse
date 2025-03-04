@@ -12,7 +12,9 @@ RUN apt-get update && apt-get install -y \
     libxtst-dev \
     libgl1-mesa-dev libglu1-mesa-dev libx11-dev \
     libfreenect-dev \
-    libpthread-stubs0-dev
+    libpthread-stubs0-dev \
+    gdb 
+    #only for debugging
 
 #    libopencv-dev
     ## Install OpenCV ##########
